@@ -1,0 +1,19 @@
+{
+  "name": "timetrack-widget",
+  "version": "1.0.0",
+  "description": "Lightweight cross-platform billable time tracking widget",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1",
+    "@tauri-apps/plugin-dialog": "^2.0.1",
+    "@tauri-apps/plugin-fs": "^2.0.2"
+  }
+}
