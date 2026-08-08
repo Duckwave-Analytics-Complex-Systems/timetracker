@@ -66,6 +66,11 @@ fn reset_project(db: State<Db>, id: String) -> Result<(), String> {
     db.reset_project(&id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn set_project_logo(db: State<Db>, id: String, data_url: Option<String>) -> Result<(), String> {
+    db.set_logo(&id, data_url).map_err(|e| e.to_string())
+}
+
 /// Starts `id`, first pausing whatever else is running -- this is the one
 /// place that enforces "only one active project at a time".
 #[tauri::command]
@@ -111,47 +116,38 @@ fn checkpoint(db: State<Db>, running_id: Option<String>) -> Result<CheckpointRes
     })
 }
 
-#[tauri::command]
-fn export_json(db: State<Db>) -> Result<String, String> {
-    let entries = db.entries_for_export().map_err(|e| e.to_string())?;
-    let projects = db.list_projects().map_err(|e| e.to_string())?;
-    let payload = serde_json::json!({
-        "exported_at": now_ms(),
-        "projects": projects,
-        "entries": entries.into_iter().map(|(name, e)| serde_json::json!({
-            "project": name,
-            "entry_id": e.id,
-            "start_ts": e.start_ts,
-            "end_ts": e.end_ts,
-            "seconds": e.seconds,
-        })).collect::<Vec<_>>(),
-    });
-    serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())
-}
-
+/// Exports one row per project: name, total time, total bill, hourly rate.
+/// If a project is currently running, its elapsed time is checkpointed
+/// first so the export reflects work up to this exact second without
+/// pausing (and therefore without disrupting) the active timer.
 #[tauri::command]
 fn export_csv(db: State<Db>) -> Result<String, String> {
-    let entries = db.entries_for_export().map_err(|e| e.to_string())?;
-    let mut csv = String::from("project,start_iso,end_iso,seconds,hh_mm_ss\n");
-    for (name, e) in entries {
-        let start = chrono::DateTime::from_timestamp_millis(e.start_ts)
-            .map(|d| d.to_rfc3339())
-            .unwrap_or_default();
-        let end = chrono::DateTime::from_timestamp_millis(e.end_ts)
-            .map(|d| d.to_rfc3339())
-            .unwrap_or_default();
-        let h = e.seconds / 3600;
-        let m = (e.seconds % 3600) / 60;
-        let s = e.seconds % 60;
+    let now = now_ms();
+    for p in db.list_projects().map_err(|e| e.to_string())? {
+        if p.is_running {
+            db.checkpoint_running(&p.id, now).map_err(|e| e.to_string())?;
+        }
+    }
+    let projects = db.list_projects().map_err(|e| e.to_string())?;
+
+    let mut csv = String::from("Project Name,Total Time,Total Bill,Hourly Rate\n");
+    for p in projects {
+        let h = p.total_seconds / 3600;
+        let m = (p.total_seconds % 3600) / 60;
+        let s = p.total_seconds % 60;
+        let time_str = format!("{:02}:{:02}:{:02}", h, m, s);
+        let (bill_str, rate_str) = if p.hourly_rate > 0.0 {
+            let bill = (p.total_seconds as f64 / 3600.0) * p.hourly_rate;
+            (format!("{:.2}", bill), format!("{:.2}", p.hourly_rate))
+        } else {
+            (String::new(), String::new())
+        };
         csv.push_str(&format!(
-            "\"{}\",{},{},{},{:02}:{:02}:{:02}\n",
-            name.replace('"', "\"\""),
-            start,
-            end,
-            e.seconds,
-            h,
-            m,
-            s
+            "\"{}\",{},{},{}\n",
+            p.name.replace('"', "\"\""),
+            time_str,
+            bill_str,
+            rate_str
         ));
     }
     Ok(csv)
@@ -181,10 +177,10 @@ fn main() {
             update_project,
             delete_project,
             reset_project,
+            set_project_logo,
             start_project,
             pause_project,
             checkpoint,
-            export_json,
             export_csv,
         ])
         .run(tauri::generate_context!())

@@ -1,4 +1,9 @@
 # TimeTrack — billable project time widget
+## Developed By
+
+Duckwave Physics Inspired, Modeling and Analytics
+
+Co-authors: @pplalo (GitHub)
 
 A frameless, dark-mode desktop widget for tracking billable time per project.
 Built with **Tauri 2 (Rust) + vanilla HTML/CSS/JS** — chosen over Electron

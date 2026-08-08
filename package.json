@@ -1,8 +1,12 @@
 {
   "name": "timetrack-widget",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Lightweight cross-platform billable time tracking widget",
   "private": true,
+  "author": "Duckwave Physics Inspired, Modeling and Analytics",
+  "contributors": [
+    "@pplalo"
+  ],
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",

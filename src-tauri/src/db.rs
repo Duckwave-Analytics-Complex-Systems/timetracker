@@ -15,6 +15,10 @@ pub struct Project {
     pub run_started_at: Option<i64>,
     pub created_at: i64,
     pub archived: bool,
+    // Small base64 data: URL for the project's logo/avatar. Resized
+    // client-side before it ever reaches this column, so it stays cheap
+    // to store as TEXT.
+    pub logo_data: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -68,6 +72,11 @@ pub fn init(app_data_dir: PathBuf) -> SqlResult<Db> {
         ",
     )?;
 
+    // Migration for DBs created by v1.0.0, which predates the logo feature.
+    // ALTER TABLE ADD COLUMN errors if the column already exists, so this
+    // is best-effort and the error (already-there) is intentionally ignored.
+    let _ = conn.execute("ALTER TABLE projects ADD COLUMN logo_data TEXT", []);
+
     Ok(Db(Mutex::new(conn)))
 }
 
@@ -75,7 +84,7 @@ impl Db {
     pub fn list_projects(&self) -> SqlResult<Vec<Project>> {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, hourly_rate, total_seconds, is_running, run_started_at, created_at, archived
+            "SELECT id, name, hourly_rate, total_seconds, is_running, run_started_at, created_at, archived, logo_data
              FROM projects WHERE archived = 0 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -88,6 +97,7 @@ impl Db {
                 run_started_at: r.get(5)?,
                 created_at: r.get(6)?,
                 archived: r.get::<_, i64>(7)? != 0,
+                logo_data: r.get(8)?,
             })
         })?;
         rows.collect()
@@ -108,6 +118,15 @@ impl Db {
         conn.execute(
             "UPDATE projects SET name = ?1, hourly_rate = ?2 WHERE id = ?3",
             params![name, hourly_rate, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_logo(&self, id: &str, logo_data: Option<String>) -> SqlResult<()> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "UPDATE projects SET logo_data = ?1 WHERE id = ?2",
+            params![logo_data, id],
         )?;
         Ok(())
     }
@@ -195,6 +214,7 @@ impl Db {
         Ok(new_total)
     }
 
+    #[allow(dead_code)]
     pub fn entries_for_export(&self) -> SqlResult<Vec<(String, TimeEntry)>> {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(

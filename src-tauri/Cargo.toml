@@ -1,7 +1,8 @@
 [package]
 name = "timetrack-widget"
-version = "1.0.0"
+version = "2.0.0"
 description = "Lightweight cross-platform billable time tracking widget"
+authors = ["Duckwave Physics Inspired, Modeling and Analytics", "pplalo"]
 edition = "2021"
 rust-version = "1.77"
 
