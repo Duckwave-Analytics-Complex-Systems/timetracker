@@ -1,7 +1,13 @@
-import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { save } from '@tauri-apps/plugin-dialog';
-import { writeTextFile } from '@tauri-apps/plugin-fs';
+// NOTE: this file intentionally avoids `import '@tauri-apps/api/...'` bare
+// specifiers. There is no bundler (Vite/webpack) in this project, and a
+// WebView cannot resolve npm package names on its own -- that silently
+// breaks the whole script (and therefore every button) if you re-add them.
+// `withGlobalTauri: true` in tauri.conf.json exposes the same API on
+// `window.__TAURI__` instead, which works with a plain <script> tag.
+const { invoke } = window.__TAURI__.core;
+const { getCurrentWindow } = window.__TAURI__.window;
+const { save } = window.__TAURI__.dialog;
+const { writeTextFile } = window.__TAURI__.fs;
 
 const appWindow = getCurrentWindow();
 
