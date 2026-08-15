@@ -21,6 +21,7 @@ const dialogForm = document.getElementById('projectForm');
 const dialogTitle = document.getElementById('dialogTitle');
 const nameInput = document.getElementById('projectName');
 const rateInput = document.getElementById('projectRate');
+const peopleInput = document.getElementById('projectPeople');
 const settingsPanel = document.getElementById('settingsPanel');
 const sortSelect = document.getElementById('sortSelect');
 const logoInput = document.getElementById('logoInput');
@@ -53,11 +54,11 @@ function fmtHMS(totalSeconds) {
 function liveSeconds(p) {
   if (!p.is_running || !p.run_started_at) return p.total_seconds;
   const elapsed = Math.floor((Date.now() - p.run_started_at) / 1000);
-  return p.total_seconds + Math.max(0, elapsed);
+  return p.total_seconds + Math.max(0, elapsed)*(p.people_count || 1);
 }
 
 function currentBill(p, seconds) {
-  return (seconds / 3600) * (p.hourly_rate || 0);
+  return (seconds / 3600) * (p.hourly_rate || 0) * (p.people_count || 1);
 }
 
 function money(amount) {
@@ -116,6 +117,7 @@ function render() {
             <span class="status-dot"></span>
             <span>${p.is_running ? 'Running' : 'Paused'}</span>
             ${p.hourly_rate ? `<span>·</span><span class="earnings">${money(bill)}</span>` : ''}
+            ${p.people_count > 1 ? `<span>·</span><span class="people-badge">×${p.people_count}</span>` : ''}
           </div>
         </div>
       </div>
@@ -191,6 +193,7 @@ function openDialog(project) {
   dialogTitle.textContent = project ? 'Edit Project' : 'New Project';
   nameInput.value = project ? project.name : '';
   rateInput.value = project ? project.hourly_rate || '' : '';
+  peopleInput.value = project ? project.people_count || 1 : 1;
   dialogEl.showModal();
   nameInput.focus();
 }
@@ -199,13 +202,14 @@ dialogForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = nameInput.value.trim();
   const rate = parseFloat(rateInput.value) || 0;
+  const peopleCount = Math.max(1, parseInt(peopleInput.value, 10) || 1);
   if (!name) return;
 
   try {
     if (editingId) {
-      await invoke('update_project', { id: editingId, name, hourlyRate: rate });
+      await invoke('update_project', { id: editingId, name, hourlyRate: rate, peopleCount });
     } else {
-      await invoke('add_project', { name, hourlyRate: rate });
+      await invoke('add_project', { name, hourlyRate: rate, peopleCount });
     }
     await refresh();
     dialogEl.close();
@@ -214,14 +218,49 @@ dialogForm.addEventListener('submit', async (e) => {
   }
 });
 
-// ---------------- Card action menu ----------------
+// Card action menu. Rebuilt per-project on open (so "Remove logo" only
+// shows up when there's a logo to remove) and measured before it's
+// positioned, so it can flip above the button instead of running off the
+// bottom of the window — this is what was broken for the last card(s) in
+// the list, where "below the button" had no room left.
 function openCardMenu(evt, id) {
   evt.stopPropagation();
   menuTargetId = id;
-  const rect = evt.currentTarget.getBoundingClientRect();
-  menuEl.style.top = `${rect.bottom + 4}px`;
-  menuEl.style.left = `${Math.max(8, rect.right - 140)}px`;
+  const project = projects.find((p) => p.id === id);
+
+  menuEl.innerHTML = `
+    <button data-action="edit">Edit</button>
+    <button data-action="logo">Change logo</button>
+    ${project.logo_data ? '<button data-action="remove-logo">Remove logo</button>' : ''}
+    <button data-action="reset">Reset time</button>
+    <button data-action="delete" class="danger">Delete</button>
+  `;
+
+  // Measure with the menu laid out but invisible, so getBoundingClientRect
+  // reflects its real size before it's ever shown in the wrong place.
   menuEl.classList.remove('hidden');
+  menuEl.style.visibility = 'hidden';
+  menuEl.style.top = '0px';
+  menuEl.style.left = '0px';
+
+  const btnRect = evt.currentTarget.getBoundingClientRect();
+  const menuRect = menuEl.getBoundingClientRect();
+  const margin = 8;
+
+  let top = btnRect.bottom + 4;
+  if (top + menuRect.height > window.innerHeight - margin) {
+    // Not enough room below (e.g. this is the last card in the list) —
+    // open upward from the button instead.
+    top = btnRect.top - menuRect.height - 4;
+  }
+  top = Math.max(margin, Math.min(top, window.innerHeight - menuRect.height - margin));
+
+  let left = btnRect.right - menuRect.width;
+  left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
+
+  menuEl.style.top = `${top}px`;
+  menuEl.style.left = `${left}px`;
+  menuEl.style.visibility = 'visible';
 }
 document.addEventListener('click', () => menuEl.classList.add('hidden'));
 
@@ -238,6 +277,9 @@ menuEl.addEventListener('click', async (e) => {
     logoTargetId = targetId;
     logoInput.value = '';
     logoInput.click();
+  } else if (action === 'remove-logo') {
+    await invoke('set_project_logo', { id: targetId, dataUrl: null });
+    await refresh();
   } else if (action === 'reset') {
     if (confirm(`Reset all tracked time for "${project.name}"?`)) {
       await invoke('reset_project', { id: project.id });

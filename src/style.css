@@ -358,6 +358,13 @@ body {
   gap: 6px;
 }
 .card-sub .earnings { color: var(--accent-earnings); }
+.people-badge {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  border: 1px solid var(--border-hair);
+  border-radius: 4px;
+  padding: 0 4px;
+}
 .status-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--text-faint);
@@ -378,7 +385,9 @@ body {
 /* Floating action menu */
 .card-menu {
   position: fixed;
-  min-width: 140px;
+  min-width: 150px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   background: var(--surface-raised);
   border: 1px solid var(--border-hair);
   border-radius: 10px;
@@ -429,6 +438,12 @@ body {
 .field input:focus {
   outline: none;
   border-color: var(--accent-running);
+}
+.field-hint {
+  margin: -6px 0 12px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  line-height: 1.4;
 }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .btn-secondary, .btn-primary {

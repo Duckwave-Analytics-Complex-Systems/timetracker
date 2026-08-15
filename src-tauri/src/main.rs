@@ -40,9 +40,9 @@ fn get_projects(db: State<Db>) -> Result<Vec<Project>, String> {
 }
 
 #[tauri::command]
-fn add_project(db: State<Db>, name: String, hourly_rate: f64) -> Result<Project, String> {
+fn add_project(db: State<Db>, name: String, hourly_rate: f64, people_count: i64) -> Result<Project, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    db.create_project(&id, &name, hourly_rate, now_ms())
+    db.create_project(&id, &name, hourly_rate, people_count, now_ms())
         .map_err(|e| e.to_string())?;
     db.list_projects()
         .map_err(|e| e.to_string())?
@@ -52,8 +52,8 @@ fn add_project(db: State<Db>, name: String, hourly_rate: f64) -> Result<Project,
 }
 
 #[tauri::command]
-fn update_project(db: State<Db>, id: String, name: String, hourly_rate: f64) -> Result<(), String> {
-    db.rename_project(&id, &name, hourly_rate).map_err(|e| e.to_string())
+fn update_project(db: State<Db>, id: String, name: String, hourly_rate: f64, people_count: i64) -> Result<(), String> {
+    db.rename_project(&id, &name, hourly_rate, people_count).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -137,7 +137,7 @@ fn export_csv(db: State<Db>) -> Result<String, String> {
         let s = p.total_seconds % 60;
         let time_str = format!("{:02}:{:02}:{:02}", h, m, s);
         let (bill_str, rate_str) = if p.hourly_rate > 0.0 {
-            let bill = (p.total_seconds as f64 / 3600.0) * p.hourly_rate;
+            let bill = (p.total_seconds as f64 / 3600.0) * p.hourly_rate * p.people_count.max(1) as f64;
             (format!("{:.2}", bill), format!("{:.2}", p.hourly_rate))
         } else {
             (String::new(), String::new())

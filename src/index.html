@@ -103,6 +103,11 @@
         <span>Hourly rate (optional)</span>
         <input id="projectRate" type="number" min="0" step="0.01" placeholder="0.00" />
       </label>
+      <label class="field">
+        <span>People billing this project</span>
+        <input id="projectPeople" type="number" min="1" step="1" value="1" />
+      </label>
+      <p class="field-hint">Bill is multiplied by this number — e.g. 2 people pairing for 1 tracked hour bills as 2 hours.</p>
       <div class="dialog-actions">
         <button type="button" id="dialogCancel" class="btn-secondary">Cancel</button>
         <button type="submit" id="dialogSave" class="btn-primary">Save</button>
@@ -110,13 +115,10 @@
     </form>
   </dialog>
 
-  <!-- Card action menu (edit / logo / reset / delete) -->
-  <div id="cardMenu" class="card-menu hidden">
-    <button data-action="edit">Edit</button>
-    <button data-action="logo">Change logo</button>
-    <button data-action="reset">Reset time</button>
-    <button data-action="delete" class="danger">Delete</button>
-  </div>
+  <!-- Card action menu — contents are built in JS per-project (e.g. "Remove
+       logo" only shows when a logo exists) and repositioned on open to stay
+       inside the viewport regardless of where the card sits in the list. -->
+  <div id="cardMenu" class="card-menu hidden"></div>
 
   <script src="main.js"></script>
 </body>

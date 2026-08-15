@@ -19,6 +19,10 @@ pub struct Project {
     // client-side before it ever reaches this column, so it stays cheap
     // to store as TEXT.
     pub logo_data: Option<String>,
+    // Number of people simultaneously billing this project's tracked
+    // time (e.g. 2 people pairing on it doubles the bill for the same
+    // wall-clock duration). Always >= 1.
+    pub people_count: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -57,7 +61,8 @@ pub fn init(app_data_dir: PathBuf) -> SqlResult<Db> {
             is_running      INTEGER NOT NULL DEFAULT 0,
             run_started_at  INTEGER,
             created_at      INTEGER NOT NULL,
-            archived        INTEGER NOT NULL DEFAULT 0
+            archived        INTEGER NOT NULL DEFAULT 0,
+            people_count    INTEGER NOT NULL DEFAULT 1
         );
 
         CREATE TABLE IF NOT EXISTS time_entries (
@@ -76,6 +81,12 @@ pub fn init(app_data_dir: PathBuf) -> SqlResult<Db> {
     // ALTER TABLE ADD COLUMN errors if the column already exists, so this
     // is best-effort and the error (already-there) is intentionally ignored.
     let _ = conn.execute("ALTER TABLE projects ADD COLUMN logo_data TEXT", []);
+    // Migration for DBs created before v3.0.0, which predates the
+    // multi-person billing multiplier.
+    let _ = conn.execute(
+        "ALTER TABLE projects ADD COLUMN people_count INTEGER NOT NULL DEFAULT 1",
+        [],
+    );
 
     Ok(Db(Mutex::new(conn)))
 }
@@ -84,7 +95,7 @@ impl Db {
     pub fn list_projects(&self) -> SqlResult<Vec<Project>> {
         let conn = self.0.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, hourly_rate, total_seconds, is_running, run_started_at, created_at, archived, logo_data
+            "SELECT id, name, hourly_rate, total_seconds, is_running, run_started_at, created_at, archived, logo_data, people_count
              FROM projects WHERE archived = 0 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -98,26 +109,27 @@ impl Db {
                 created_at: r.get(6)?,
                 archived: r.get::<_, i64>(7)? != 0,
                 logo_data: r.get(8)?,
+                people_count: r.get(9)?,
             })
         })?;
         rows.collect()
     }
 
-    pub fn create_project(&self, id: &str, name: &str, hourly_rate: f64, now: i64) -> SqlResult<()> {
+    pub fn create_project(&self, id: &str, name: &str, hourly_rate: f64, people_count: i64, now: i64) -> SqlResult<()> {
         let conn = self.0.lock().unwrap();
         conn.execute(
-            "INSERT INTO projects (id, name, hourly_rate, total_seconds, is_running, run_started_at, created_at, archived)
-             VALUES (?1, ?2, ?3, 0, 0, NULL, ?4, 0)",
-            params![id, name, hourly_rate, now],
+            "INSERT INTO projects (id, name, hourly_rate, total_seconds, is_running, run_started_at, created_at, archived, people_count)
+             VALUES (?1, ?2, ?3, 0, 0, NULL, ?4, 0, ?5)",
+            params![id, name, hourly_rate, now, people_count.max(1)],
         )?;
         Ok(())
     }
 
-    pub fn rename_project(&self, id: &str, name: &str, hourly_rate: f64) -> SqlResult<()> {
+    pub fn rename_project(&self, id: &str, name: &str, hourly_rate: f64, people_count: i64) -> SqlResult<()> {
         let conn = self.0.lock().unwrap();
         conn.execute(
-            "UPDATE projects SET name = ?1, hourly_rate = ?2 WHERE id = ?3",
-            params![name, hourly_rate, id],
+            "UPDATE projects SET name = ?1, hourly_rate = ?2, people_count = ?3 WHERE id = ?4",
+            params![name, hourly_rate, people_count.max(1), id],
         )?;
         Ok(())
     }
