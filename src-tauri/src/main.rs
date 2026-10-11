@@ -3,7 +3,7 @@
 
 mod db;
 
-use db::{Db, Project};
+use db::{DailyRow, Db, Project};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -116,6 +116,16 @@ fn checkpoint(db: State<Db>, running_id: Option<String>) -> Result<CheckpointRes
     })
 }
 
+/// Tracked seconds per local day per project for an inclusive day range
+/// ("YYYY-MM-DD" strings, computed by the frontend in the same local time
+/// zone the backend uses to bucket days). Powers the Today strip and the
+/// Stats tab. Time from a timer that is running right now is added by the
+/// frontend on top, since the DB is at most one autosave tick behind.
+#[tauri::command]
+fn get_daily(db: State<Db>, from_day: String, to_day: String) -> Result<Vec<DailyRow>, String> {
+    db.daily_range(&from_day, &to_day).map_err(|e| e.to_string())
+}
+
 /// Exports one row per project: name, total time, total bill, hourly rate.
 /// If a project is currently running, its elapsed time is checkpointed
 /// first so the export reflects work up to this exact second without
@@ -181,6 +191,7 @@ fn main() {
             start_project,
             pause_project,
             checkpoint,
+            get_daily,
             export_csv,
         ])
         .run(tauri::generate_context!())

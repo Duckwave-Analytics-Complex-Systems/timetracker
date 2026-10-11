@@ -57,35 +57,102 @@
       <button id="resetColorsBtn" class="settings-action subtle">Reset colors</button>
     </div>
 
-    <div class="toolbar">
-      <h1>Projects</h1>
-      <button id="addProjectBtn" class="add-btn">
-        <span class="plus">+</span> Add Project
-      </button>
-    </div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button class="tab" role="tab" data-view="projects" aria-selected="true">Projects</button>
+      <button class="tab" role="tab" data-view="stats" aria-selected="false">Stats</button>
+    </nav>
 
-    <div class="sort-row">
-      <label for="sortSelect">Sort by</label>
-      <select id="sortSelect">
-        <option value="name">Name</option>
-        <option value="rate">Hourly rate</option>
-        <option value="bill">Current bill</option>
-      </select>
-    </div>
+    <!-- ============ Projects view ============ -->
+    <section id="viewProjects" class="view" role="tabpanel">
+      <!-- Today: hours tracked so far today, split by project (opens Stats) -->
+      <div id="todayStrip" class="today-strip" role="button" tabindex="0" aria-label="Today's hours by project. Open stats.">
+        <div class="today-head">
+          <span class="today-label">Today</span>
+          <span class="today-right"><span id="todayTotal" class="today-total">0m</span><span class="today-chev" aria-hidden="true">›</span></span>
+        </div>
+        <div id="todayBar" class="today-bar"></div>
+        <div id="todayLegend" class="today-legend"></div>
+      </div>
 
-    <div id="sleepBanner" class="sleep-banner hidden">
-      Timer paused — the system was asleep.
-    </div>
+      <div class="toolbar">
+        <div class="sort-row">
+          <label for="sortSelect">Sort by</label>
+          <select id="sortSelect">
+            <option value="name">Name</option>
+            <option value="rate">Hourly rate</option>
+            <option value="bill">Current bill</option>
+          </select>
+        </div>
+        <button id="addProjectBtn" class="add-btn">
+          <span class="plus">+</span> Add Project
+        </button>
+      </div>
 
-    <main id="projectList" class="project-list" aria-live="polite">
-      <!-- project cards injected here -->
-    </main>
+      <div id="sleepBanner" class="sleep-banner hidden">
+        Timer paused — the system was asleep.
+      </div>
 
-    <div id="emptyState" class="empty-state hidden">
-      <div class="empty-ring"></div>
-      <p>No projects yet.</p>
-      <p class="muted">Add one to start tracking billable time.</p>
-    </div>
+      <main id="projectList" class="project-list" aria-live="polite">
+        <!-- project cards injected here -->
+      </main>
+
+      <div id="emptyState" class="empty-state hidden">
+        <div class="empty-ring"></div>
+        <p>No projects yet.</p>
+        <p class="muted">Add one to start tracking billable time.</p>
+      </div>
+    </section>
+
+    <!-- ============ Stats view ============ -->
+    <section id="viewStats" class="view hidden" role="tabpanel">
+      <div class="stats-scroll">
+        <div class="stats-controls">
+          <div id="rangeSeg" class="seg" role="group" aria-label="Period">
+            <button data-range="7d">7 days</button>
+            <button data-range="30d">30 days</button>
+            <button data-range="12w">12 weeks</button>
+          </div>
+        </div>
+
+        <div class="tiles">
+          <div class="tile"><div class="tile-label">Total tracked</div><div id="tileTotal" class="tile-value">0m</div><div id="tileTotalSub" class="tile-sub"></div></div>
+          <div class="tile"><div class="tile-label">Avg per active day</div><div id="tileAvg" class="tile-value">—</div><div id="tileAvgSub" class="tile-sub"></div></div>
+          <div class="tile"><div class="tile-label">Best day</div><div id="tileBest" class="tile-value">—</div><div id="tileBestSub" class="tile-sub"></div></div>
+          <div class="tile"><div class="tile-label">Billed</div><div id="tileBill" class="tile-value">—</div><div id="tileBillSub" class="tile-sub"></div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2 id="chartTitle">Hours per day</h2>
+            <span class="panel-hint">Click a bar for details</span>
+          </div>
+          <div id="chartLegend" class="legend"></div>
+          <div id="chartWrap" class="chart-wrap">
+            <div id="chartHost"></div>
+            <div id="chartTip" class="chart-tip hidden" role="status"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2 id="dayTitle">Today</h2>
+            <span id="dayTotal" class="panel-total"></span>
+          </div>
+          <div id="dayRows" class="meter-rows"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>By project</h2>
+            <span id="projTotal" class="panel-total"></span>
+          </div>
+          <div id="projRows" class="meter-rows"></div>
+        </div>
+
+        <!-- Screen-reader table view of the chart data -->
+        <table id="statsTable" class="sr-only"></table>
+      </div>
+    </section>
   </div>
 
   <!-- hidden input used to pick a project logo image; reused across cards -->

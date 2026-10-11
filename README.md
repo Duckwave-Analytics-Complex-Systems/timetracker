@@ -58,6 +58,30 @@ timetrack/
 - **Export**: `export_csv` / `export_json` commands build the report
   server-side; the frontend uses the `dialog` plugin's native save picker.
 
+## v4.0.0: daily hours and Stats
+
+- **Per-day ledger.** Every autosave tick and every pause also adds the
+  tracked seconds to a `daily_totals` table (one row per local day per
+  project). A session that crosses midnight is split at local midnight, so
+  23:50 -> 00:20 counts 10 minutes to the first day and 20 to the next.
+  Databases from v1-v3 are backfilled once from their existing session rows
+  on first launch (`PRAGMA user_version` guards against doing it twice).
+- **Today strip** (top of the Projects tab): hours so far today, split by
+  project. Clicking it opens Stats.
+- **Stats tab**: 7 days / 30 days / 12 weeks, summary tiles (total, average
+  per active day, best day, billed), a stacked chart per day (per week for
+  12 weeks), a detail panel for the selected day, and a per-project
+  breakdown. Hover for a tooltip; click or press Enter on a column to select it.
+- **Colors.** Each project keeps a fixed color slot (8 validated categorical
+  colors); a 9th+ project is shown as "Other".
+- **Billed** in Stats uses each project's *current* rate and people count.
+- **Reset time** on a project also clears that project's daily history.
+- **Autosave fix.** Checkpoints used to advance the run start to "now",
+  dropping the sub-second remainder every ~7s (a few percent under-count on
+  long sessions). They now advance by exactly the whole seconds banked.
+
+Run the backend tests with `cd src-tauri && cargo test`.
+
 ## Prerequisites
 
 Both platforms need:
@@ -103,10 +127,10 @@ This produces platform-native installers under `src-tauri/target/release/bundle/
 
 | Platform | Output |
 |---|---|
-| Linux | `bundle/appimage/timetrack-widget_1.0.0_amd64.AppImage` |
-| Linux | `bundle/deb/timetrack-widget_1.0.0_amd64.deb` |
-| Windows | `bundle/msi/TimeTrack_1.0.0_x64_en-US.msi` |
-| Windows | `bundle/nsis/TimeTrack_1.0.0_x64-setup.exe` |
+| Linux | `bundle/appimage/timetrack-widget_4.0.0_amd64.AppImage` |
+| Linux | `bundle/deb/timetrack-widget_4.0.0_amd64.deb` |
+| Windows | `bundle/msi/TimeTrack_4.0.0_x64_en-US.msi` |
+| Windows | `bundle/nsis/TimeTrack_4.0.0_x64-setup.exe` |
 
 Cross-compiling Windows installers from Linux (or vice versa) isn't
 reliably supported by Tauri — build each target on its native OS, or use a

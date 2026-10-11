@@ -7,3 +7,6 @@ dist/
 # Lock files
 *.lock
 
+package-lock.json
+Cargo.lock
+
