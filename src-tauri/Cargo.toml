@@ -1,6 +1,6 @@
 [package]
 name = "timetrack-widget"
-version = "4.0.0"
+version = "5.0.0"
 description = "Lightweight cross-platform billable time tracking widget"
 authors = ["Duckwave Physics Inspired, Modeling and Analytics", "pplalo"]
 edition = "2021"
@@ -18,10 +18,13 @@ serde_json = "1.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.10", features = ["v4", "serde"] }
-once_cell = "1.19"
 
 # Bundled sqlite (via the `bundled` feature above) means no system libsqlite3
 # is required on either Windows or Linux -- keeps the build reproducible.
+
+# Signal handling (pause the timer on SIGTERM/SIGINT/SIGHUP), see src/shutdown.rs.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [[bin]]
 name = "timetrack-widget"

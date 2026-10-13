@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project · TimeTrack</title>
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/project.css" />
+</head>
+<body>
+  <!-- One window per project, opened by the open_project_window command.
+       The project id is in the window label ("project-<id>"). -->
+  <div id="app">
+    <header id="titlebar">
+      <div class="titlebar-left">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name" id="windowTitle">Project</span>
+        </div>
+      </div>
+      <div class="titlebar-actions">
+        <button data-window="minimize" class="icon-btn" title="Minimize">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path d="M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button data-window="maximize" class="icon-btn" title="Toggle window size">
+          <svg viewBox="0 0 24 24" width="13" height="13"><rect x="5" y="5" width="14" height="14" rx="1.5" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>
+        </button>
+        <button data-window="close" class="icon-btn danger" title="Close">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ============ Header: identity + timer ============ -->
+    <section class="proj-head">
+      <div id="projLogo"></div>
+      <div class="proj-title">
+        <h1 id="projName"></h1>
+        <div class="proj-meta" id="projMeta"></div>
+      </div>
+      <div class="proj-timer" id="projTimer">
+        <div class="timer-read">
+          <div class="timer-time" id="timerTime">00:00:00</div>
+          <div class="timer-sub" id="timerSub"></div>
+        </div>
+        <label class="phase-pick" title="New tracked time is booked to this phase">
+          <span>Booking to</span>
+          <select id="phaseSelect"></select>
+        </label>
+        <button id="timerBtn" class="timer-btn">Start</button>
+      </div>
+    </section>
+
+    <div id="archivedBanner" class="notice hidden">
+      <span>This project is filed: its history is kept, and the timer is off until you restore it.</span>
+      <button id="restoreBtn" class="btn-secondary">Restore</button>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="Project views">
+      <button class="tab" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+      <button class="tab" role="tab" data-tab="schedule" aria-selected="false">Schedule</button>
+      <button class="tab" role="tab" data-tab="report" aria-selected="false">Report</button>
+    </nav>
+
+    <main class="proj-body scroll">
+      <!-- ============ Overview (js/project/overview.js) ============ -->
+      <section id="tabOverview" class="pane" role="tabpanel"></section>
+
+      <!-- ============ Schedule: plan + cronogram (js/project/gantt.js) ============ -->
+      <section id="tabSchedule" class="pane hidden" role="tabpanel">
+        <form class="panel plan-form" id="planForm" autocomplete="off">
+          <div class="panel-head"><h2>Plan</h2><span class="panel-hint" id="planStatus"></span></div>
+          <div class="plan-grid">
+            <label class="field"><span>Start date</span><input type="date" id="planStart" /></label>
+            <label class="field"><span>Due date</span><input type="date" id="planDue" /></label>
+            <label class="field"><span>Budget (hours)</span><input type="number" id="planBudget" min="0" step="1" placeholder="Sum of phases" /></label>
+            <label class="field plan-desc"><span>Description</span><textarea id="planDesc" rows="2" maxlength="400" placeholder="What is this project about? Shown on the report."></textarea></label>
+          </div>
+        </form>
+
+        <section class="panel gantt-panel">
+          <div class="gantt-toolbar">
+            <h2>Timeline</h2>
+            <div class="seg" id="zoomSeg" role="group" aria-label="Zoom">
+              <button data-zoom="day">Days</button>
+              <button data-zoom="week">Weeks</button>
+              <button data-zoom="month">Months</button>
+            </div>
+            <button class="btn-secondary" id="todayBtn">Today</button>
+            <span class="spacer"></span>
+            <button class="btn-secondary" id="addMilestoneBtn"><span class="ms-icon"></span>Milestone</button>
+            <button class="btn-primary" id="addPhaseBtn">+ Phase</button>
+          </div>
+          <div id="ganttHost" class="gantt-host"></div>
+          <p class="panel-hint gantt-help">
+            Drag a bar to move it, drag its edges to change dates, click to edit.
+            Bars fill with the progress %; the thin line under a bar is tracked hours against its estimate (red when over).
+          </p>
+        </section>
+      </section>
+
+      <!-- ============ Report (js/project/report.js) ============ -->
+      <section id="tabReport" class="pane hidden" role="tabpanel">
+        <div class="report-layout">
+          <aside class="panel report-options">
+            <h2>Progress report</h2>
+            <label class="field"><span>Prepared by</span><input id="reportAuthor" maxlength="80" placeholder="Your name or company" /></label>
+            <label class="field"><span>Notes for this report</span><textarea id="reportNotes" rows="5" placeholder="Highlights, blockers, next steps…"></textarea></label>
+            <label class="check"><input type="checkbox" id="optPhases" checked /> Hours by phase</label>
+            <label class="check"><input type="checkbox" id="optCharts" checked /> Charts</label>
+            <label class="check"><input type="checkbox" id="optBilling" /> Billing figures</label>
+            <div class="report-actions">
+              <button class="btn-primary" id="exportReportBtn">Export HTML…</button>
+              <button class="btn-secondary" id="printReportBtn">Print / PDF</button>
+            </div>
+            <p class="panel-hint" id="reportStatus">The exported file is self-contained: open it in any browser, send it, or print it to PDF.</p>
+          </aside>
+          <div class="report-preview" id="reportPreview"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Add / edit a phase or milestone (js/project/phase-dialog.js) -->
+  <dialog id="phaseDialog" class="dialog phase-dialog">
+    <form id="phaseForm">
+      <h2 id="phaseDialogTitle">New phase</h2>
+      <div class="seg kind-seg" id="phaseKind" role="group" aria-label="Type">
+        <button type="button" data-kind="phase">Phase</button>
+        <button type="button" data-kind="milestone">Milestone</button>
+      </div>
+      <label class="field"><span>Name</span><input id="phaseName" maxlength="80" required placeholder="e.g. Design, Development, Launch" /></label>
+      <div class="field"><span>Color</span><div class="swatches" id="phaseColors"></div></div>
+      <div class="field-row">
+        <label class="field"><span id="phaseStartLabel">Start</span><input type="date" id="phaseStart" required /></label>
+        <label class="field" id="phaseEndField"><span>End <em id="phaseDuration"></em></span><input type="date" id="phaseEnd" required /></label>
+      </div>
+      <div class="field-row" id="phaseWorkFields">
+        <label class="field"><span>Estimated hours</span><input type="number" id="phaseEstimate" min="0" step="0.5" placeholder="0" /></label>
+        <div class="field"><span>Tracked so far</span><div class="readout" id="phaseSpent">0 h</div></div>
+      </div>
+      <label class="field" id="phaseProgressField"><span>Progress <b id="phaseProgressOut">0%</b></span><input type="range" id="phaseProgress" min="0" max="100" step="5" /></label>
+      <label class="check" id="phaseReachedField"><input type="checkbox" id="phaseReached" /> Reached</label>
+      <p class="field-error hidden" id="phaseError"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn-danger" id="phaseDelete">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn-secondary" id="phaseCancel">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/project/main.js"></script>
+</body>
+</html>

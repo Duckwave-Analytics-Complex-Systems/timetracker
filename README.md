@@ -18,45 +18,76 @@ required), in WAL mode for crash safety.
 ```
 timetrack/
 ├── package.json                  # frontend tooling (Tauri CLI)
-├── src/                          # frontend (plain HTML/CSS/JS, no framework)
-│   ├── index.html
-│   ├── style.css
-│   └── main.js
+├── src/                          # frontend: plain HTML/CSS + native ES modules, no build step
+│   ├── index.html                # the widget
+│   ├── project.html              # one window per project (Overview / Schedule / Report)
+│   ├── css/                      # base.css (shared), widget.css, project.css
+│   └── js/
+│       ├── core/                 # Tauri bridge, API, formatting, time model, charts, theme
+│       ├── widget/               # projects list, Stats, Archive, settings
+│       └── project/              # metrics, Gantt, phase editor, overview, report
 └── src-tauri/                    # Rust backend
     ├── Cargo.toml
-    ├── build.rs
     ├── tauri.conf.json           # window, bundle, and security config
     ├── capabilities/default.json # Tauri v2 permission grants
-    ├── icons/                    # app icons (placeholders — see below)
+    ├── icons/
     └── src/
-        ├── main.rs               # commands, single-timer enforcement, sleep detection
-        └── db.rs                 # SQLite schema + queries
+        ├── main.rs               # app setup, window/exit events
+        ├── commands.rs           # everything the frontend can call
+        ├── events.rs             # "data-changed" event that keeps windows in sync
+        ├── watchdog.rs           # sleep detection + liveness stamp
+        ├── shutdown.rs           # pausing the timer however the app ends
+        └── db/                   # SQLite schema, migrations, queries, tests
 ```
 
 ## How the core requirements are implemented
 
-- **Single active timer**: `start_project` in `main.rs` always calls
-  `pause_all_running` before starting the requested project, so exactly one
-  project can be `is_running` at a time — enforced server-side, not just in
-  the UI.
-- **Auto-save every 5-10s**: `main.js` calls the `checkpoint` command on a
-  7s interval. The backend folds elapsed running time into `total_seconds`
-  and writes a `time_entries` row, so a hard crash loses at most ~7s of work.
-- **Idle/sleep handling**: there's no single cross-platform "system is
-  sleeping" event without pulling in per-OS APIs (Win32
-  `WM_POWERBROADCAST`, Linux `logind` D-Bus signals). Instead, `checkpoint`
-  compares the wall-clock gap between heartbeats; a gap far larger than the
-  7s tick (>30s) means the process was suspended, so the backend pauses the
-  timer and excludes the sleep interval from billable time. If you need
-  exact suspend/resume events, swap this heuristic for `windows-rs`'
-  `RegisterPowerSettingNotification` on Windows and a `zbus` listener on
-  `org.freedesktop.login1.Manager.PrepareForSleep` on Linux — the
-  `checkpoint` command is the single integration point.
-- **Crash/reboot persistence**: SQLite in WAL mode plus the closing-window
-  handler in `main.rs` (`on_window_event` → `CloseRequested`) flush the
-  running timer before the process exits.
-- **Export**: `export_csv` / `export_json` commands build the report
-  server-side; the frontend uses the `dialog` plugin's native save picker.
+- **Single active timer**: `Db::start_project` pauses whatever is running and
+  starts the new project in one transaction, so it's enforced server-side.
+- **Saving**: a running timer is just a start timestamp. Its time is written
+  once, when the session closes (pause, switch, sleep, exit). While it runs, a
+  background thread writes one small "still alive" timestamp every 30 s. There
+  are no per-tick rows any more.
+- **Never billing time the app was closed**: closing the widget, quitting, and
+  (on Linux) logout/shutdown/`kill` signals all pause the timer. If the app
+  dies some other way (crash, power loss, Windows shutdown), the next launch
+  stops the timer at the last "still alive" stamp and tells you so.
+- **Idle/sleep handling**: the backend thread compares wall-clock time between
+  its 5 s ticks. A gap over 30 s means the machine was suspended, so the timer
+  is paused as of the last tick and the sleep isn't billed. Real OS events
+  (Win32 `WM_POWERBROADCAST`, logind `PrepareForSleep`) can be plugged into
+  `watchdog.rs`.
+- **Export**: `export_csv` builds the per-project CSV, and the project window
+  exports a self-contained HTML progress report. Both use the native save dialog.
+
+## v5.0.0: projects, schedules and reports
+
+- **Filing (archive).** "File (archive)" in a project's ⋯ menu removes it from
+  the list and Stats but keeps all its history. The new **Archive** tab lists
+  filed projects: open, restore or delete them.
+- **Project window.** Click a project's name (or ⋯ → Open project) to open
+  its own window:
+  - **Overview**: health (On track / At risk / Behind / Completed) with the
+    reasons, key figures, work-vs-time-vs-budget bars, hours per phase,
+    hours per week, and cumulative hours against the plan.
+  - **Schedule**: start/due dates, hour budget, description, and a colored
+    Gantt chart (days/weeks/months zoom) of phases and milestones. Drag bars
+    to move them, drag edges to change dates, click to edit name, color,
+    dates, estimated hours and progress %.
+  - **Report**: a light, printable progress report (summary, key figures,
+    progress, schedule, hours by phase, charts, forecast, billing, next 30
+    days, your notes) exported as a single HTML file you can open anywhere
+    or print to PDF.
+- **Hours per phase.** Pick the phase you're working on ("Booking to" in the
+  project window). Tracked time is booked to that phase, and switching phase
+  mid-session splits it cleanly. The widget card shows the active phase.
+- **Fix: timer kept counting after the app was shut down.** See "Never
+  billing time the app was closed" above.
+- **Fix: 7-second autosave.** Replaced by session-based saving plus a 30 s
+  liveness stamp. Upgrading merges the old per-tick rows into one row per
+  session (totals unchanged).
+- **Fix: false sleep pauses.** Sleep detection now runs in the backend, not
+  in a WebView timer that is throttled when the window is minimized.
 
 ## v4.0.0: daily hours and Stats
 
@@ -127,10 +158,10 @@ This produces platform-native installers under `src-tauri/target/release/bundle/
 
 | Platform | Output |
 |---|---|
-| Linux | `bundle/appimage/timetrack-widget_4.0.0_amd64.AppImage` |
-| Linux | `bundle/deb/timetrack-widget_4.0.0_amd64.deb` |
-| Windows | `bundle/msi/TimeTrack_4.0.0_x64_en-US.msi` |
-| Windows | `bundle/nsis/TimeTrack_4.0.0_x64-setup.exe` |
+| Linux | `bundle/appimage/timetrack-widget_5.0.0_amd64.AppImage` |
+| Linux | `bundle/deb/timetrack-widget_5.0.0_amd64.deb` |
+| Windows | `bundle/msi/TimeTrack_5.0.0_x64_en-US.msi` |
+| Windows | `bundle/nsis/TimeTrack_5.0.0_x64-setup.exe` |
 
 Cross-compiling Windows installers from Linux (or vice versa) isn't
 reliably supported by Tauri — build each target on its native OS, or use a

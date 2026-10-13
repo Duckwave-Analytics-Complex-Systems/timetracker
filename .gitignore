@@ -10,3 +10,9 @@ dist/
 package-lock.json
 Cargo.lock
 
+*.png
+*.xml
+icon.icns
+icon.ico
+settings.json
+CLAUDE.md
