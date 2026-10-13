@@ -17,4 +17,4 @@ icon.ico
 settings.json
 CLAUDE.md
 
-gen/schemas
+src-tauri/gen/schemas
