@@ -41,3 +41,15 @@ pub(super) fn record_daily(conn: &Connection, project_id: &str, start_s: i64, se
     }
     Ok(())
 }
+
+/// Takes a span back out of the per-day ledger (a synced entry was removed or
+/// changed on another device). The exact inverse of `record_daily`.
+pub(super) fn unrecord_daily(conn: &Connection, project_id: &str, start_s: i64, seconds: i64) -> SqlResult<()> {
+    for (day, secs) in split_by_local_day(start_s, seconds) {
+        conn.execute(
+            "UPDATE daily_totals SET seconds = MAX(0, seconds - ?3) WHERE day = ?1 AND project_id = ?2",
+            params![day, project_id, secs],
+        )?;
+    }
+    Ok(())
+}

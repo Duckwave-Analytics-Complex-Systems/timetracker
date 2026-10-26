@@ -10,6 +10,7 @@
 //! | `timer.rs`    | start / pause / crash recovery / liveness stamp             |
 //! | `phases.rs`   | the schedule (phases + milestones) and hours per phase      |
 //! | `stats.rs`    | read-only per-day queries for Stats and the project window  |
+//! | `sync.rs`     | cloud sync: outbox triggers, applying pulled rows, timer    |
 //!
 //! Every public method locks the connection once. Helpers that need to run
 //! inside another method's lock take `&Connection` instead of `&self`,
@@ -20,6 +21,7 @@ mod phases;
 mod projects;
 mod schema;
 mod stats;
+mod sync;
 mod timer;
 
 #[cfg(test)]
@@ -32,6 +34,7 @@ use std::sync::{Mutex, MutexGuard};
 pub use phases::{Phase, PhaseInput};
 pub use projects::{PlanInput, Project};
 pub use stats::{DailyRow, DayTotal};
+pub use sync::{Entity, Pending, RemoteTimer, TimerPush};
 pub use timer::RecoveredRun;
 
 pub struct Db(Mutex<Connection>);

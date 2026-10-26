@@ -18,7 +18,7 @@ use tauri::{AppHandle, Manager};
 
 /// Closes the open session (if any) as of now.
 pub fn pause_timers(app: &AppHandle) {
-    if let Err(e) = app.state::<Db>().pause_all_running(now_ms()) {
+    if let Err(e) = app.state::<Db>().pause_own_running(now_ms()) {
         eprintln!("pause on exit failed: {e}");
     }
 }

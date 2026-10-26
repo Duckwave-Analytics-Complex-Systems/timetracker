@@ -30,7 +30,9 @@ const TABLES: &str = "
         start_day       TEXT,                        -- YYYY-MM-DD
         due_day         TEXT,                        -- YYYY-MM-DD
         budget_hours    REAL,                        -- NULL = sum of phase estimates
-        active_phase_id TEXT                         -- new time is booked to this phase
+        active_phase_id TEXT,                        -- new time is booked to this phase
+        -- v6
+        run_device      TEXT                         -- NULL = the open session is this device's; else the cloud device id that started it
     );
 
     CREATE TABLE IF NOT EXISTS time_entries (
@@ -91,8 +93,10 @@ pub(super) fn migrate(conn: &mut Connection) -> SqlResult<()> {
         ensure_column(conn, "projects", col, ty)?; // v5
     }
     ensure_column(conn, "time_entries", "phase_id", "TEXT")?; // v5
+    ensure_column(conn, "projects", "run_device", "TEXT")?; // v6
 
     conn.execute_batch(INDEXES)?;
+    conn.execute_batch(super::sync::SYNC_TABLES)?; // v6
 
     let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     if version < 4 {

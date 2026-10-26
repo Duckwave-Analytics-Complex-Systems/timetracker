@@ -8,11 +8,13 @@
 //! - `events`    the `data-changed` event that keeps windows in sync
 //! - `watchdog`  sleep detection + liveness stamp (background thread)
 //! - `shutdown`  pausing the timer on every way the app can end
+//! - `sync`      optional cloud sync with Supabase (background thread)
 
 mod commands;
 mod db;
 mod events;
 mod shutdown;
+mod sync;
 mod watchdog;
 
 use std::sync::Mutex;
@@ -40,6 +42,8 @@ fn main() {
             app.manage(commands::Recovered(Mutex::new(recovered)));
             app.manage(watchdog::Watchdog::new(now_ms()));
             watchdog::spawn(app.handle().clone());
+            app.manage(sync::SyncState::default());
+            sync::spawn(app.handle().clone());
             shutdown::install_signal_handlers(app.handle().clone());
             Ok(())
         })
@@ -75,6 +79,10 @@ fn main() {
             commands::get_daily,
             commands::export_csv,
             commands::open_project_window,
+            commands::cloud_status,
+            commands::cloud_sign_in,
+            commands::cloud_sign_out,
+            commands::cloud_sync_now,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

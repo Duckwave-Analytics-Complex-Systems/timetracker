@@ -32,6 +32,8 @@ pub struct Project {
     pub active_phase_id: Option<String>,
     pub active_phase_name: Option<String>,
     pub active_phase_color: Option<i64>,
+    /// Set while running a session started on another device (cloud sync).
+    pub run_device: Option<String>,
 }
 
 impl Project {
@@ -60,7 +62,7 @@ const SELECT_PROJECT: &str = "
     SELECT p.id, p.name, p.hourly_rate, p.total_seconds, p.is_running, p.run_started_at,
            p.created_at, p.archived, p.archived_at, p.logo_data, p.people_count,
            p.description, p.start_day, p.due_day, p.budget_hours,
-           p.active_phase_id, ph.name, ph.color
+           p.active_phase_id, ph.name, ph.color, p.run_device
     FROM projects p LEFT JOIN phases ph ON ph.id = p.active_phase_id";
 
 fn from_row(r: &Row) -> SqlResult<Project> {
@@ -83,6 +85,7 @@ fn from_row(r: &Row) -> SqlResult<Project> {
         active_phase_id: r.get(15)?,
         active_phase_name: r.get(16)?,
         active_phase_color: r.get(17)?,
+        run_device: r.get(18)?,
     })
 }
 

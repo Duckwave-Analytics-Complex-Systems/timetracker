@@ -42,6 +42,10 @@
           <span class="switch-track"><span class="switch-thumb"></span></span>
         </label>
       </div>
+      <button id="cloudBtn" class="settings-action">
+        <svg viewBox="0 0 24 24" width="13" height="13"><path d="M7 18h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.1 9.5 4.25 4.25 0 0 0 7 18z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linejoin="round"/></svg>
+        <span class="cloud-label">Cloud sync<span id="cloudState" class="cloud-state">Off</span></span>
+      </button>
       <button id="exportBtn" class="settings-action">
         <svg viewBox="0 0 24 24" width="13" height="13"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 19h14" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Export report (CSV)
@@ -192,6 +196,48 @@
       <div class="dialog-actions">
         <button type="button" id="dialogCancel" class="btn-secondary">Cancel</button>
         <button type="submit" id="dialogSave" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Cloud sync: link this computer to a Supabase project shared with other
+       computers and the Android app (js/widget/cloud.js, src-tauri/src/sync.rs) -->
+  <dialog id="cloudDialog" class="dialog">
+    <form id="cloudForm" method="dialog">
+      <h2>Cloud sync</h2>
+      <div id="cloudSignedIn" class="hidden">
+        <p class="cloud-summary" id="cloudSummary"></p>
+        <p id="cloudError" class="field-error hidden"></p>
+        <div class="dialog-actions">
+          <button type="button" id="cloudSignOut" class="btn-secondary">Sign out</button>
+          <span class="spacer"></span>
+          <button type="button" id="cloudClose" class="btn-secondary">Close</button>
+          <button type="button" id="cloudSyncNow" class="btn-primary">Sync now</button>
+        </div>
+      </div>
+      <div id="cloudSignedOut">
+        <p class="field-hint">Syncs projects, phases and tracked time with the TimeTrack Android app through your Supabase project.</p>
+        <label class="field">
+          <span>Supabase project URL</span>
+          <input id="cloudUrl" type="url" required autocomplete="off" placeholder="https://xxxx.supabase.co" />
+        </label>
+        <label class="field">
+          <span>Anon (public) key</span>
+          <input id="cloudKey" type="text" required autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span>Email</span>
+          <input id="cloudEmail" type="email" required autocomplete="username" />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="cloudPassword" type="password" required autocomplete="current-password" />
+        </label>
+        <p id="cloudFormError" class="field-error hidden"></p>
+        <div class="dialog-actions">
+          <button type="button" id="cloudCancel" class="btn-secondary">Cancel</button>
+          <button type="submit" id="cloudSignIn" class="btn-primary">Sign in</button>
+        </div>
       </div>
     </form>
   </dialog>

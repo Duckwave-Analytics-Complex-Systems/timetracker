@@ -6,6 +6,7 @@
 
 use crate::db::{self, DailyRow, DayTotal, Db, Phase, PhaseInput, PlanInput, Project, RecoveredRun};
 use crate::events::{notify, Change};
+use crate::sync::{self as cloud, SyncStatus};
 use crate::{now_ms, watchdog};
 use serde::Serialize;
 use std::sync::Mutex;
@@ -191,6 +192,39 @@ pub fn export_csv(db: State<Db>) -> CmdResult<String> {
         csv.push_str(&format!("\"{}\",{},{},{}\n", p.name.replace('"', "\"\""), time, bill, rate));
     }
     Ok(csv)
+}
+
+// ---------------------------------------------------------------- cloud sync
+//
+// Network calls block, so these run on a worker thread (`async` + spawn_blocking)
+// instead of the main thread.
+
+#[tauri::command]
+pub fn cloud_status(app: AppHandle) -> SyncStatus {
+    cloud::status(&app)
+}
+
+#[tauri::command]
+pub async fn cloud_sign_in(app: AppHandle, url: String, anon_key: String, email: String, password: String) -> CmdResult<SyncStatus> {
+    tauri::async_runtime::spawn_blocking(move || cloud::sign_in(&app, &url, &anon_key, &email, &password))
+        .await
+        .map_err(msg)?
+}
+
+#[tauri::command]
+pub async fn cloud_sign_out(app: AppHandle) -> CmdResult<SyncStatus> {
+    tauri::async_runtime::spawn_blocking(move || cloud::sign_out(&app)).await.map_err(msg)?
+}
+
+/// Syncs right now and returns the resulting status.
+#[tauri::command]
+pub async fn cloud_sync_now(app: AppHandle) -> CmdResult<SyncStatus> {
+    tauri::async_runtime::spawn_blocking(move || {
+        cloud::run_cycle(&app);
+        cloud::status(&app)
+    })
+    .await
+    .map_err(msg)
 }
 
 // ---------------------------------------------------------------- windows

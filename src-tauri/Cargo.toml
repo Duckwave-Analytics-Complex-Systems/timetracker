@@ -18,6 +18,8 @@ serde_json = "1.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.10", features = ["v4", "serde"] }
+# Cloud sync over HTTPS (src/sync.rs). Blocking, rustls, no async runtime needed.
+ureq = "2.12"
 
 # Bundled sqlite (via the `bundled` feature above) means no system libsqlite3
 # is required on either Windows or Linux -- keeps the build reproducible.

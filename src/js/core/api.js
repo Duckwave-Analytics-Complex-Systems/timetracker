@@ -36,11 +36,18 @@ export const api = {
   // ---- stats & export
   daily: (fromDay, toDay) => invoke('get_daily', { fromDay, toDay }),
   exportCsv: () => invoke('export_csv'),
+
+  // ---- cloud sync (src-tauri/src/sync.rs). Each returns
+  // { url, email, signed_in, last_sync_at, last_error }.
+  cloudStatus: () => invoke('cloud_status'),
+  cloudSignIn: ({ url, anonKey, email, password }) => invoke('cloud_sign_in', { url, anonKey, email, password }),
+  cloudSignOut: () => invoke('cloud_sign_out'),
+  cloudSyncNow: () => invoke('cloud_sync_now'),
 };
 
 /**
  * Calls `handler(reason)` whenever the backend changed data, from any window.
- * reason: 'timer' | 'projects' | 'schedule' | 'paused_for_sleep'
+ * reason: 'timer' | 'projects' | 'schedule' | 'paused_for_sleep' | 'synced'
  * (see src-tauri/src/events.rs).
  */
 export function onDataChanged(handler) {

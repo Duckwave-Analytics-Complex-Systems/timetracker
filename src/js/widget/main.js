@@ -11,6 +11,7 @@ import { useSharedTheme } from '../core/theme.js';
 import { renderArchive } from './archive.js';
 import { ensureColorSlots } from './colors.js';
 import { renderProjects } from './projects.js';
+import { initCloud, refreshCloud } from './cloud.js';
 import { initSettings } from './settings.js';
 import { chartHover, renderStats, renderToday, resetChartHover, resetSelection } from './stats.js';
 import { onRefresh, refresh, state } from './store.js';
@@ -83,6 +84,7 @@ async function showRecoveredRuns() {
 
 onDataChanged((reason) => {
   if (reason === 'paused_for_sleep') showNotice('Timer paused: the computer was asleep.', 8000);
+  if (reason === 'synced') refreshCloud();
   refresh().catch((err) => console.error('refresh failed', err));
 });
 
@@ -106,6 +108,7 @@ function tick() {
 setupTitlebar($('titlebar'));
 useSharedTheme();
 initSettings();
+initCloud();
 refresh()
   .then(showRecoveredRuns)
   .catch((err) => console.error('boot failed', err));

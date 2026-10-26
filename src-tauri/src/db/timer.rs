@@ -13,7 +13,7 @@
 //! running. Time while the app was closed is never billed.
 
 use super::days::record_daily;
-use super::{new_id, Db};
+use super::Db;
 use rusqlite::{params, Connection, Result as SqlResult};
 use serde::Serialize;
 
@@ -28,9 +28,17 @@ pub struct RecoveredRun {
     pub seconds: i64,
 }
 
+/// The id of the time entry a session is booked as. Deterministic, so when two
+/// synced devices both close the same session they write the same row.
+/// The Android app builds ids the same way; the format must never change.
+pub fn session_id(project_id: &str, started_at: i64) -> String {
+    format!("{project_id}@{started_at}")
+}
+
 /// Closes the open session of one project as of `end` (ms). Returns the
-/// seconds booked. Does nothing if the project isn't running.
-fn pause_one(conn: &Connection, id: &str, end: i64) -> SqlResult<i64> {
+/// seconds booked. Does nothing if the project isn't running, and books
+/// nothing if this session is already booked (it arrived from another device).
+pub(super) fn pause_one(conn: &Connection, id: &str, end: i64) -> SqlResult<i64> {
     let (running, started_at, phase_id): (bool, Option<i64>, Option<String>) = conn.query_row(
         "SELECT is_running, run_started_at, active_phase_id FROM projects WHERE id = ?1",
         params![id],
@@ -41,26 +49,43 @@ fn pause_one(conn: &Connection, id: &str, end: i64) -> SqlResult<i64> {
     }
     let elapsed = started_at.map(|s| ((end - s) / 1000).max(0)).unwrap_or(0);
     conn.execute(
-        "UPDATE projects SET is_running = 0, run_started_at = NULL, last_alive_at = NULL,
-                             total_seconds = total_seconds + ?1
-         WHERE id = ?2",
-        params![elapsed, id],
+        "UPDATE projects SET is_running = 0, run_started_at = NULL, last_alive_at = NULL, run_device = NULL
+         WHERE id = ?1",
+        params![id],
     )?;
     if let (Some(start), true) = (started_at, elapsed > 0) {
-        conn.execute(
-            "INSERT INTO time_entries (id, project_id, start_ts, end_ts, seconds, phase_id)
+        let booked = conn.execute(
+            "INSERT OR IGNORE INTO time_entries (id, project_id, start_ts, end_ts, seconds, phase_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![new_id(), id, start, start + elapsed * 1000, elapsed, phase_id],
+            params![session_id(id, start), id, start, start + elapsed * 1000, elapsed, phase_id],
         )?;
-        record_daily(conn, id, start / 1000, elapsed)?;
+        if booked == 1 {
+            conn.execute(
+                "UPDATE projects SET total_seconds = total_seconds + ?1 WHERE id = ?2",
+                params![elapsed, id],
+            )?;
+            record_daily(conn, id, start / 1000, elapsed)?;
+        }
     }
     Ok(elapsed)
 }
 
-/// Closes every open session as of `now`. Returns the ids that were running.
+/// Closes every open session as of `now`, wherever it was started. Returns
+/// the ids that were running.
 pub(super) fn pause_all(conn: &Connection, now: i64) -> SqlResult<Vec<String>> {
+    pause_where(conn, now, "is_running = 1")
+}
+
+/// Closes only sessions started on this device. Exit, sleep and crash
+/// recovery use this: a timer started on the phone keeps running when the
+/// desktop app closes.
+fn pause_own(conn: &Connection, now: i64) -> SqlResult<Vec<String>> {
+    pause_where(conn, now, "is_running = 1 AND run_device IS NULL")
+}
+
+fn pause_where(conn: &Connection, now: i64, filter: &str) -> SqlResult<Vec<String>> {
     let running: Vec<String> = conn
-        .prepare("SELECT id FROM projects WHERE is_running = 1")?
+        .prepare(&format!("SELECT id FROM projects WHERE {filter}"))?
         .query_map([], |r| r.get(0))?
         .collect::<SqlResult<_>>()?;
     for id in &running {
@@ -71,7 +96,7 @@ pub(super) fn pause_all(conn: &Connection, now: i64) -> SqlResult<Vec<String>> {
 
 fn start(conn: &Connection, id: &str, now: i64) -> SqlResult<()> {
     conn.execute(
-        "UPDATE projects SET is_running = 1, run_started_at = ?1, last_alive_at = ?1
+        "UPDATE projects SET is_running = 1, run_started_at = ?1, last_alive_at = ?1, run_device = NULL
          WHERE id = ?2 AND archived = 0",
         params![now, id],
     )?;
@@ -89,6 +114,7 @@ impl Db {
         tx.commit()
     }
 
+    /// The Pause button: stops the timer wherever it was started.
     pub fn pause_all_running(&self, now: i64) -> SqlResult<Vec<String>> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -97,11 +123,22 @@ impl Db {
         Ok(ids)
     }
 
+    /// Exit and sleep: stops only a timer started on this device.
+    pub fn pause_own_running(&self, now: i64) -> SqlResult<Vec<String>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let ids = pause_own(&tx, now)?;
+        tx.commit()?;
+        Ok(ids)
+    }
+
     /// Records that the app is still alive with a timer running. One tiny
     /// UPDATE; a no-op when nothing runs.
     pub fn touch_alive(&self, now: i64) -> SqlResult<()> {
-        self.conn()
-            .execute("UPDATE projects SET last_alive_at = ?1 WHERE is_running = 1", params![now])?;
+        self.conn().execute(
+            "UPDATE projects SET last_alive_at = ?1 WHERE is_running = 1 AND run_device IS NULL",
+            params![now],
+        )?;
         Ok(())
     }
 
@@ -111,7 +148,11 @@ impl Db {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         let open: Vec<(String, String, Option<i64>, Option<i64>)> = tx
-            .prepare("SELECT id, name, run_started_at, last_alive_at FROM projects WHERE is_running = 1")?
+            // A session started on another device isn't ours to close: sync reconciles it.
+            .prepare(
+                "SELECT id, name, run_started_at, last_alive_at FROM projects
+                 WHERE is_running = 1 AND run_device IS NULL",
+            )?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
             .collect::<SqlResult<_>>()?;
 

@@ -64,7 +64,7 @@ function cardHtml(p, seconds) {
         ${phase}
         <div class="card-sub">
           <span class="status-dot"></span>
-          <span>${p.is_running ? 'Running' : 'Paused'}</span>
+          <span>${p.is_running ? (p.run_device ? 'Running on phone' : 'Running') : 'Paused'}</span>
           ${p.hourly_rate ? `<span>·</span><span class="earnings">${money(bill(p, seconds))}</span>` : ''}
           ${p.people_count > 1 ? `<span>·</span><span class="people-badge">×${p.people_count}</span>` : ''}
         </div>

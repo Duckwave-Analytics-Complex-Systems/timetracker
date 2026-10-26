@@ -276,3 +276,270 @@ fn upgrade_from_v4_merges_autosave_rows_into_sessions() {
         .unwrap();
     assert_eq!(rows, vec![(T0, T0 + 21_000, 21), (T0 + 60_000, T0 + 67_000, 7)]);
 }
+
+// ---------------------------------------------------------------- cloud sync
+//
+// Two devices against an in-memory stand-in for Supabase: rows keyed by
+// (table, id) with an increasing `updated_at`, and the `push_timer()` rules
+// from supabase/schema.sql.
+
+mod cloud {
+    use super::*;
+    use crate::db::{Entity, RemoteTimer, TimerPush};
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct Server {
+        rows: HashMap<(&'static str, String), (u64, Value)>,
+        clock: u64,
+        timer: RemoteTimer,
+    }
+
+    impl Server {
+        fn push_timer(&mut self, op: &TimerPush, device: &str) -> RemoteTimer {
+            let t = &mut self.timer;
+            match op {
+                TimerPush::Start { project_id, phase_id, started_at } => {
+                    if t.started_at.map_or(true, |s| *started_at > s) {
+                        *t = RemoteTimer {
+                            project_id: Some(project_id.clone()),
+                            phase_id: phase_id.clone(),
+                            started_at: Some(*started_at),
+                            ended_at: None,
+                            running: true,
+                            device_id: Some(device.into()),
+                        };
+                    }
+                }
+                TimerPush::Stop { project_id, started_at, ended_at } => {
+                    if t.running && t.is_session(project_id, *started_at) {
+                        t.running = false;
+                        t.ended_at = Some((*ended_at).max(*started_at));
+                    }
+                }
+            }
+            t.clone()
+        }
+    }
+
+    struct Device {
+        db: Db,
+        name: &'static str,
+        cursor: HashMap<&'static str, u64>,
+        known: Option<RemoteTimer>,
+    }
+
+    impl Device {
+        fn new(tag: &str, name: &'static str) -> Self {
+            Device { db: fresh(tag), name, cursor: HashMap::new(), known: None }
+        }
+
+        fn push(&self, server: &mut Server) {
+            for e in Entity::ALL {
+                let batch = self.db.pending(e, 1000).unwrap();
+                for p in &batch {
+                    server.clock += 1;
+                    let key = (e.table(), p.id.clone());
+                    let row = p.row.clone().unwrap_or_else(|| {
+                        // a tombstone keeps the other columns
+                        let mut old = server.rows.get(&key).map(|r| r.1.clone()).unwrap_or(serde_json::json!({ "id": p.id }));
+                        old["deleted"] = Value::Bool(true);
+                        old
+                    });
+                    server.rows.insert(key, (server.clock, row));
+                }
+                self.db.ack(e, &batch).unwrap();
+            }
+        }
+
+        /// One full cycle, in the same order as `sync::cycle`.
+        fn sync(&mut self, server: &mut Server, now: i64) {
+            self.push(server);
+            for e in Entity::ALL {
+                let since = *self.cursor.get(e.table()).unwrap_or(&0);
+                let mut rows: Vec<(u64, Value)> = server
+                    .rows
+                    .iter()
+                    .filter(|((t, _), (at, _))| *t == e.table() && *at > since)
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                rows.sort_by_key(|r| r.0);
+                if let Some(last) = rows.last() {
+                    self.cursor.insert(e.table(), last.0);
+                }
+                let values: Vec<Value> = rows.into_iter().map(|r| r.1).collect();
+                self.db.apply_remote(e, &values).unwrap();
+            }
+            let remote = match self.db.timer_push(self.known.as_ref(), now).unwrap() {
+                Some(op) => server.push_timer(&op, self.name),
+                None => server.timer.clone(),
+            };
+            self.db.reconcile_timer(&remote, self.name, now).unwrap();
+            self.known = Some(remote);
+            self.push(server);
+        }
+    }
+
+    fn running(db: &Db) -> Option<(String, i64)> {
+        db.list_projects(false)
+            .unwrap()
+            .into_iter()
+            .find(|p| p.is_running)
+            .map(|p| (p.id, p.run_started_at.unwrap()))
+    }
+
+    fn totals(db: &Db) -> Vec<(String, i64)> {
+        let mut v: Vec<_> = db.list_projects(false).unwrap().into_iter().map(|p| (p.id, p.total_seconds)).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn local_changes_are_queued_and_acknowledged() {
+        let db = fresh("sync_outbox");
+        db.create_project("a", "A", 10.0, 1, T0).unwrap();
+        let p = db.pending(Entity::Project, 10).unwrap();
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].row.as_ref().unwrap()["name"], "A");
+        db.ack(Entity::Project, &p).unwrap();
+        assert!(db.pending(Entity::Project, 10).unwrap().is_empty());
+
+        // starting the timer and the liveness stamp are not row changes
+        db.start_project("a", T0).unwrap();
+        db.touch_alive(T0 + 30_000).unwrap();
+        assert!(db.pending(Entity::Project, 10).unwrap().is_empty());
+
+        // closing the session books one entry with the session id
+        db.pause_all_running(T0 + 60_000).unwrap();
+        let e = db.pending(Entity::Entry, 10).unwrap();
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].id, format!("a@{T0}"));
+
+        // a change made while a push is in flight is kept for the next push
+        db.update_project("a", "A2", 10.0, 1).unwrap();
+        let stale = db.pending(Entity::Project, 10).unwrap();
+        db.update_project("a", "A3", 10.0, 1).unwrap();
+        db.ack(Entity::Project, &stale).unwrap();
+        assert_eq!(db.pending(Entity::Project, 10).unwrap()[0].row.as_ref().unwrap()["name"], "A3");
+
+        // a delete goes up as a tombstone, its entries too
+        db.delete_project("a").unwrap();
+        assert!(db.pending(Entity::Project, 10).unwrap()[0].row.is_none());
+        assert!(db.pending(Entity::Entry, 10).unwrap()[0].row.is_none());
+    }
+
+    #[test]
+    fn switching_accounts_wipes_without_sending_deletes() {
+        let db = fresh("sync_wipe");
+        db.create_project("a", "A", 0.0, 1, T0).unwrap();
+        db.start_project("a", T0).unwrap();
+        db.pause_all_running(T0 + 60_000).unwrap();
+        assert!(db.unsynced_changes().unwrap() > 0);
+
+        db.wipe_local_data().unwrap();
+        assert!(db.list_projects(false).unwrap().is_empty());
+        assert_eq!(entry_count(&db), 0);
+        assert_eq!(daily_sum(&db), 0);
+        // nothing queued: the old account's server copy is left alone
+        assert_eq!(db.unsynced_changes().unwrap(), 0);
+    }
+
+    #[test]
+    fn rows_and_derived_totals_converge() {
+        let mut server = Server::default();
+        let mut desk = Device::new("sync_rows_desk", "desk");
+        let mut phone = Device::new("sync_rows_phone", "phone");
+
+        desk.db.create_project("a", "A", 50.0, 1, T0).unwrap();
+        desk.db.start_project("a", T0).unwrap();
+        desk.db.pause_all_running(T0 + 90 * 60_000).unwrap();
+        desk.sync(&mut server, T0 + 91 * 60_000);
+        phone.sync(&mut server, T0 + 92 * 60_000);
+
+        assert_eq!(totals(&phone.db), vec![("a".into(), 5400)]);
+        assert_eq!(daily_sum(&phone.db), 5400);
+
+        // pulling the same rows again changes nothing
+        phone.cursor.clear();
+        phone.sync(&mut server, T0 + 93 * 60_000);
+        assert_eq!(totals(&phone.db), vec![("a".into(), 5400)]);
+        assert_eq!(daily_sum(&phone.db), 5400);
+
+        // reset on the phone: its entry tombstones clear the desktop's totals
+        phone.db.reset_project("a").unwrap();
+        phone.sync(&mut server, T0 + 94 * 60_000);
+        desk.sync(&mut server, T0 + 95 * 60_000);
+        assert_eq!(totals(&desk.db), vec![("a".into(), 0)]);
+        assert_eq!(daily_sum(&desk.db), 0);
+
+        // a rename on one side reaches the other
+        desk.db.update_project("a", "Renamed", 50.0, 2).unwrap();
+        desk.sync(&mut server, T0 + 96 * 60_000);
+        phone.sync(&mut server, T0 + 97 * 60_000);
+        let p = project(&phone.db, "a");
+        assert_eq!((p.name.as_str(), p.people_count), ("Renamed", 2));
+
+        // deleting reaches the other side
+        phone.db.delete_project("a").unwrap();
+        phone.sync(&mut server, T0 + 98 * 60_000);
+        desk.sync(&mut server, T0 + 99 * 60_000);
+        assert!(desk.db.get_project("a").unwrap().is_none());
+    }
+
+    #[test]
+    fn one_timer_across_devices() {
+        let mut server = Server::default();
+        let mut desk = Device::new("sync_timer_desk", "desk");
+        let mut phone = Device::new("sync_timer_phone", "phone");
+        desk.db.create_project("a", "A", 0.0, 1, T0).unwrap();
+        desk.db.create_project("b", "B", 0.0, 1, T0).unwrap();
+        desk.sync(&mut server, T0);
+        phone.sync(&mut server, T0);
+
+        // started on the desktop: the phone shows it running from the same moment
+        desk.db.start_project("a", T0 + 1_000).unwrap();
+        desk.sync(&mut server, T0 + 2_000);
+        phone.sync(&mut server, T0 + 3_000);
+        assert_eq!(running(&phone.db), Some(("a".into(), T0 + 1_000)));
+
+        // the desktop closes: a session started there stops, ...
+        desk.db.pause_own_running(T0 + 61_000).unwrap();
+        desk.sync(&mut server, T0 + 62_000);
+        phone.sync(&mut server, T0 + 63_000);
+        assert_eq!(running(&phone.db), None);
+        assert_eq!(totals(&phone.db), vec![("a".into(), 60), ("b".into(), 0)]);
+
+        // ... but one started on the phone keeps running
+        phone.db.start_project("b", T0 + 100_000).unwrap();
+        phone.sync(&mut server, T0 + 101_000);
+        desk.sync(&mut server, T0 + 102_000);
+        assert_eq!(running(&desk.db), Some(("b".into(), T0 + 100_000)));
+        desk.db.pause_own_running(T0 + 110_000).unwrap(); // desktop exit
+        assert_eq!(running(&desk.db), Some(("b".into(), T0 + 100_000)));
+        assert!(desk.db.recover_interrupted_runs().unwrap().is_empty());
+
+        // stopped on the desktop: both devices book the same single entry
+        desk.db.pause_all_running(T0 + 160_000).unwrap();
+        desk.sync(&mut server, T0 + 161_000);
+        phone.sync(&mut server, T0 + 162_000);
+        desk.sync(&mut server, T0 + 163_000);
+        assert_eq!(running(&phone.db), None);
+        assert_eq!(totals(&phone.db), vec![("a".into(), 60), ("b".into(), 60)]);
+        assert_eq!(totals(&desk.db), totals(&phone.db));
+        assert_eq!(entry_count(&phone.db), 2);
+
+        // both start offline: the later start wins, the other is booked up to it
+        desk.db.start_project("a", T0 + 200_000).unwrap();
+        phone.db.start_project("b", T0 + 230_000).unwrap();
+        desk.sync(&mut server, T0 + 240_000);
+        phone.sync(&mut server, T0 + 241_000);
+        desk.sync(&mut server, T0 + 242_000);
+        phone.sync(&mut server, T0 + 243_000);
+        assert_eq!(running(&desk.db), Some(("b".into(), T0 + 230_000)));
+        assert_eq!(running(&phone.db), Some(("b".into(), T0 + 230_000)));
+        assert_eq!(totals(&desk.db), vec![("a".into(), 90), ("b".into(), 60)]);
+        assert_eq!(totals(&desk.db), totals(&phone.db));
+        assert_eq!(daily_sum(&desk.db), daily_sum(&phone.db));
+    }
+}

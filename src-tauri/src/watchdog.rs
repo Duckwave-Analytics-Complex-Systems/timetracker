@@ -42,7 +42,7 @@ impl Watchdog {
     pub fn check(&self, db: &Db, now: i64) -> SqlResult<bool> {
         let last = self.last_tick_ms.swap(now, Ordering::SeqCst);
         if now - last > SLEEP_GAP_THRESHOLD_MS {
-            let paused = db.pause_all_running(last)?;
+            let paused = db.pause_own_running(last)?;
             return Ok(!paused.is_empty());
         }
         if now - self.last_stamp_ms.load(Ordering::SeqCst) >= ALIVE_STAMP_EVERY_MS {
