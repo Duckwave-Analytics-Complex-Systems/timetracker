@@ -6,8 +6,8 @@
 // nothing else (no fonts, scripts or network).
 import { burnupSvg, donutSvg, ganttSvg, weeklyBarsSvg } from '../core/charts.js';
 import { addDays, dayKey, daysBetween, escapeHtml, fmtDate, fmtHours, money, pct } from '../core/format.js';
-import { bill } from '../core/model.js';
-import { burnupLegendHtml, featureTableHtml, healthPill, kpiTilesHtml, notesHtml, phaseTableHtml, progressBarsHtml, sessionTableHtml } from './blocks.js';
+import { bill, billedPeople } from '../core/model.js';
+import { burnupLegendHtml, featureTableHtml, healthPill, kpiTilesHtml, notesHtml, phaseTableHtml, progressBarsHtml, sessionTableHtml, memberTableHtml } from './blocks.js';
 import { burnupSeries, isMilestone, phaseStatusLabel, sessionRows, summarySentence, weeklySeries } from './metrics.js';
 import { REPORT_CSS } from './report-style.js';
 
@@ -44,7 +44,7 @@ function forecastHtml(m) {
 
 function billingHtml(project, m, totalSeconds) {
   const per = (hours) => (hours == null ? null : bill(project, hours * 3600));
-  const people = Math.max(1, project.people_count || 1);
+  const people = billedPeople(project);
   return `<div class="rpt-stats">
     ${stat('Rate', `${money(project.hourly_rate)}/h`, people > 1 ? `× ${people} people` : '1 person')}
     ${stat('Billed to date', money(bill(project, totalSeconds)), fmtHours(m.spentH))}
@@ -124,6 +124,7 @@ export function reportHtml(live, m, opts) {
   }
   if (opts.includePhases) parts.push(section('Hours by phase', phaseTableHtml(m)));
   if (opts.includeFeatures && m.featureRows.length) parts.push(section('Hours by feature', featureTableHtml(m)));
+  if (opts.includePeople && live.members.length > 1) parts.push(section('Hours by person', memberTableHtml(live.members, live.totalSeconds)));
   const noted = opts.includeSessions ? sessionRows(live).filter((s) => s.note) : [];
   if (noted.length) parts.push(section('Session notes', sessionTableHtml(noted), 'rpt-wide'));
   if (opts.includeCharts) {

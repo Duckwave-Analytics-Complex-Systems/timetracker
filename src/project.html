@@ -67,6 +67,7 @@
       <button class="tab" role="tab" data-tab="schedule" aria-selected="false">Schedule</button>
       <button class="tab" role="tab" data-tab="features" aria-selected="false">Features</button>
       <button class="tab" role="tab" data-tab="history" aria-selected="false">History</button>
+      <button class="tab" role="tab" data-tab="team" aria-selected="false">Team</button>
       <button class="tab" role="tab" data-tab="report" aria-selected="false">Report</button>
     </nav>
 
@@ -122,8 +123,22 @@
       <!-- ============ History: every closed session and its note ============ -->
       <section id="tabHistory" class="pane hidden" role="tabpanel">
         <section class="panel">
-          <div class="panel-head"><h2>History</h2><span class="panel-hint">Click a session to add or edit its note</span></div>
+          <div class="panel-head"><h2>History</h2><span class="panel-hint">Click one of your sessions to add or edit its note</span></div>
           <div id="historyHost"></div>
+        </section>
+      </section>
+
+      <!-- ============ Team: who shares this project ============ -->
+      <section id="tabTeam" class="pane hidden" role="tabpanel">
+        <section class="panel">
+          <div class="panel-head"><h2>Team</h2><span class="panel-hint" id="teamHint"></span></div>
+          <form id="addMemberForm" class="team-add hidden" autocomplete="off">
+            <label class="field"><span>Add someone by their share code</span><input id="memberCode" maxlength="20" spellcheck="false" placeholder="TT-7F3K9Q" /></label>
+            <button type="submit" class="btn-primary" id="addMemberBtn">Add</button>
+          </form>
+          <p class="panel-hint" id="teamStatus"></p>
+          <div id="teamHost"></div>
+          <div class="team-leave hidden" id="teamLeave"><button type="button" class="btn-danger" id="leaveBtn">Leave project</button></div>
         </section>
       </section>
 
@@ -137,6 +152,7 @@
             <label class="check"><input type="checkbox" id="optPhases" checked /> Hours by phase</label>
             <label class="check"><input type="checkbox" id="optFeatures" checked /> Hours by feature</label>
             <label class="check"><input type="checkbox" id="optSessions" /> Session notes</label>
+            <label class="check" id="optPeopleRow"><input type="checkbox" id="optPeople" /> Hours by person</label>
             <label class="check"><input type="checkbox" id="optCharts" checked /> Charts</label>
             <label class="check"><input type="checkbox" id="optBilling" /> Billing figures</label>
             <div class="report-actions">

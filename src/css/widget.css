@@ -354,3 +354,7 @@
 @media (prefers-reduced-motion: reduce) {
   .project-card.running .ring-wrap { animation: none; }
 }
+
+.share-code { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.share-code code { font-size: 14px; letter-spacing: 0.04em; user-select: all; }
+#cloudSignedIn .dialog-actions button { padding-inline: 10px; white-space: nowrap; }

@@ -44,12 +44,19 @@ export const api = {
   daily: (fromDay, toDay) => invoke('get_daily', { fromDay, toDay }),
   exportCsv: () => invoke('export_csv'),
 
-  // ---- cloud sync (src-tauri/src/sync.rs). Each returns
-  // { url, email, signed_in, last_sync_at, last_error }.
+  // ---- cloud sync (src-tauri/src/sync.rs). These four return
+  // { url, email, signed_in, last_sync_at, last_error, profile, refused_changes }.
   cloudStatus: () => invoke('cloud_status'),
   cloudSignIn: ({ url, anonKey, email, password }) => invoke('cloud_sign_in', { url, anonKey, email, password }),
   cloudSignOut: () => invoke('cloud_sign_out'),
   cloudSyncNow: () => invoke('cloud_sync_now'),
+  cloudSetDisplayName: (name) => invoke('cloud_set_display_name', { name }),
+
+  // ---- sharing
+  /** Resolves to the added person's name. */
+  addMember: (projectId, shareCode) => invoke('cloud_add_member', { projectId, shareCode }),
+  /** Removing yourself is leaving the project. */
+  removeMember: (projectId, userId) => invoke('cloud_remove_member', { projectId, userId }),
 };
 
 /**

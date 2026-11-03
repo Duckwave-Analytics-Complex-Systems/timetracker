@@ -2,11 +2,13 @@
 //! these tables until its session closes; the frontend adds it on top
 //! (`liveAdditions()` in js/core/model.js).
 
+use super::days::split_by_local_day;
 use super::Db;
 use rusqlite::{params, Result as SqlResult};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
-/// Tracked seconds for one project on one local day ("YYYY-MM-DD").
+/// Your tracked seconds for one project on one local day ("YYYY-MM-DD").
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct DailyRow {
     pub day: String,
@@ -39,12 +41,23 @@ impl Db {
     }
 
     /// Whole per-day history of one project (archived or not), oldest first.
+    /// Counts everyone: `daily_totals` holds only your time, so teammates' is
+    /// added from their entries.
     pub fn project_daily(&self, project_id: &str) -> SqlResult<Vec<DayTotal>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT day, seconds FROM daily_totals WHERE project_id = ?1 AND seconds > 0 ORDER BY day ASC",
-        )?;
-        let rows = stmt.query_map(params![project_id], |r| Ok(DayTotal { day: r.get(0)?, seconds: r.get(1)? }))?;
-        rows.collect()
+        let mut days: BTreeMap<String, i64> = conn
+            .prepare("SELECT day, seconds FROM daily_totals WHERE project_id = ?1 AND seconds > 0")?
+            .query_map(params![project_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<SqlResult<_>>()?;
+        let others: Vec<(i64, i64)> = conn
+            .prepare("SELECT start_ts, seconds FROM time_entries WHERE project_id = ?1 AND user_id IS NOT NULL")?
+            .query_map(params![project_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<SqlResult<_>>()?;
+        for (start_ts, seconds) in others {
+            for (day, secs) in split_by_local_day(start_ts / 1000, seconds) {
+                *days.entry(day).or_insert(0) += secs;
+            }
+        }
+        Ok(days.into_iter().map(|(day, seconds)| DayTotal { day, seconds }).collect())
     }
 }

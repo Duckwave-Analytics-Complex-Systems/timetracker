@@ -341,7 +341,8 @@ fn a_database_from_before_features_gains_them_and_picks_up_the_new_trigger() {
     let id = db.save_feature(&feature_input("x", "One"), 0).unwrap();
     db.conn().execute("DELETE FROM sync_outbox", []).unwrap();
     db.set_active_feature("x", Some(&id), T0).unwrap();
-    assert_eq!(db.pending(Entity::Project, 10).unwrap().len(), 1);
+    assert_eq!(db.pending(Entity::MemberState, 10).unwrap().len(), 1, "per person now, not on the project row");
+    assert_eq!(db.pending(Entity::Project, 10).unwrap().len(), 0);
 }
 
 #[test]
@@ -559,6 +560,109 @@ mod cloud {
         let mut v: Vec<_> = db.list_projects(false).unwrap().into_iter().map(|p| (p.id, p.total_seconds)).collect();
         v.sort();
         v
+    }
+
+    fn member(project: &str, user: &str, role: &str, name: &str) -> crate::db::Member {
+        crate::db::Member { project_id: project.into(), user_id: user.into(), role: role.into(), display_name: name.into() }
+    }
+
+    fn teammate_entry(id: &str, seconds: i64) -> Value {
+        serde_json::json!({ "id": id, "project_id": "a", "start_ts": T0, "end_ts": T0 + seconds * 1000, "seconds": seconds, "user_id": "bob" })
+    }
+
+    fn shared_project(tag: &str) -> Db {
+        let db = fresh(tag);
+        db.set_sync_meta("user_id", Some("ann")).unwrap();
+        db.create_project("a", "A", 100.0, 3, T0).unwrap();
+        db.apply_members(&[member("a", "ann", "owner", "Ann"), member("a", "bob", "member", "Bob")]).unwrap();
+        db.conn().execute("DELETE FROM sync_outbox", []).unwrap();
+        db
+    }
+
+    #[test]
+    fn a_teammates_time_counts_on_the_project_but_not_in_your_day() {
+        let db = shared_project("share_totals");
+        db.start_project("a", T0).unwrap();
+        db.stop_timer(T0 + 60_000).unwrap();
+        db.conn().execute("DELETE FROM sync_outbox", []).unwrap();
+        db.apply_remote(Entity::Entry, &[teammate_entry("a@1@bob", 30)]).unwrap();
+
+        assert_eq!(project(&db, "a").total_seconds, 90);
+        assert_eq!(daily_sum(&db), 60, "Today and Stats show only your time");
+        assert_eq!(db.project_daily("a").unwrap().iter().map(|d| d.seconds).sum::<i64>(), 90, "the project's charts show everyone's");
+        assert_eq!(db.unsynced_changes().unwrap(), 0);
+
+        // their row can't be edited here, and clearing a phase doesn't queue it
+        db.set_entry_note("a@1@bob", Some("no")).unwrap();
+        let sessions = db.list_sessions("a").unwrap();
+        let theirs = sessions.iter().find(|s| !s.mine).unwrap();
+        assert_eq!(theirs.note, None);
+        assert_eq!(theirs.user_name.as_deref(), Some("Bob"));
+        let phase = db.save_phase(&phase_input("a", "P"), T0).unwrap();
+        db.conn().execute("UPDATE time_entries SET phase_id = ?1", [&phase]).unwrap();
+        db.delete_phase(&phase).unwrap();
+        assert!(db.pending(Entity::Entry, 10).unwrap().iter().all(|p| p.id != "a@1@bob"));
+
+        // withdrawing their row takes it off the total only
+        let mut gone = teammate_entry("a@1@bob", 30);
+        gone["deleted"] = Value::Bool(true);
+        db.apply_remote(Entity::Entry, &[gone]).unwrap();
+        assert_eq!(project(&db, "a").total_seconds, 60);
+        assert_eq!(daily_sum(&db), 60);
+    }
+
+    #[test]
+    fn resetting_a_shared_project_removes_only_your_time() {
+        let db = shared_project("share_reset");
+        db.start_project("a", T0).unwrap();
+        db.stop_timer(T0 + 60_000).unwrap();
+        db.apply_remote(Entity::Entry, &[teammate_entry("a@1@bob", 30)]).unwrap();
+        db.reset_project("a").unwrap();
+        assert_eq!(project(&db, "a").total_seconds, 30);
+        assert_eq!(daily_sum(&db), 0);
+        assert_eq!(entry_count(&db), 1);
+    }
+
+    #[test]
+    fn sharing_changes_the_session_id_and_the_bill() {
+        let db = shared_project("share_id");
+        assert_eq!(project(&db, "a").bill(3600), 100.0, "people_count is ignored");
+        let closed = { db.start_project("a", T0).unwrap(); db.stop_timer(T0 + 1_000).unwrap() };
+        assert_eq!(closed[0].entry_id, format!("a@{T0}@ann"));
+
+        let alone = fresh("share_id_alone");
+        alone.create_project("a", "A", 100.0, 3, T0).unwrap();
+        assert_eq!(project(&alone, "a").bill(3600), 300.0);
+        let closed = { alone.start_project("a", T0).unwrap(); alone.stop_timer(T0 + 1_000).unwrap() };
+        assert_eq!(closed[0].entry_id, format!("a@{T0}"), "unchanged, so older phones book the same row");
+    }
+
+    #[test]
+    fn being_removed_forgets_the_project_without_sending_a_delete() {
+        let db = shared_project("share_removed");
+        db.create_project("mine", "Mine", 0.0, 1, T0).unwrap();
+        db.conn().execute("DELETE FROM sync_outbox", []).unwrap();
+        assert!(db.apply_members(&[]).unwrap());
+        assert!(db.get_project("a").unwrap().is_none());
+        assert!(db.get_project("mine").unwrap().is_some(), "not yet synced, so not affected");
+        assert_eq!(db.unsynced_changes().unwrap(), 0);
+        assert!(!db.apply_members(&[]).unwrap());
+    }
+
+    #[test]
+    fn your_active_phase_is_yours() {
+        let db = shared_project("share_active");
+        db.set_active_feature("a", Some("f"), T0).unwrap();
+        assert_eq!(db.pending(Entity::Project, 10).unwrap().len(), 0, "the project row is the owner's");
+        let state = db.pending(Entity::MemberState, 10).unwrap();
+        assert_eq!(state[0].row.as_ref().unwrap()["id"], "a:ann");
+        db.conn().execute("DELETE FROM sync_outbox", []).unwrap();
+
+        // pulling the project row doesn't overwrite your choice
+        let row = serde_json::json!({ "id": "a", "name": "Renamed", "active_feature_id": "theirs" });
+        db.apply_remote(Entity::Project, &[row]).unwrap();
+        assert_eq!(project(&db, "a").name, "Renamed");
+        assert_eq!(project(&db, "a").active_feature_id.as_deref(), Some("f"));
     }
 
     #[test]

@@ -37,6 +37,11 @@ pub struct Project {
     pub active_feature_color: Option<i64>,
     /// Set while running a session started on another device (cloud sync).
     pub run_device: Option<String>,
+    /// Has more than one member. `total_seconds` then counts everyone's time.
+    pub shared: bool,
+    /// False if someone else owns it. Then only phases, features and your own
+    /// time can be changed here.
+    pub is_owner: bool,
 }
 
 impl Project {
@@ -46,9 +51,12 @@ impl Project {
         self.total_seconds + open.unwrap_or(0)
     }
 
-    /// Bill = hours x hourly_rate x people_count. Mirrors `bill()` in js/core/model.js.
+    /// Bill = hours x hourly_rate x people_count. A shared project ignores
+    /// people_count, since its hours already come from each person.
+    /// Mirrors `bill()` in js/core/model.js.
     pub fn bill(&self, seconds: i64) -> f64 {
-        (seconds as f64 / 3600.0) * self.hourly_rate * self.people_count.max(1) as f64
+        let people = if self.shared { 1 } else { self.people_count.max(1) };
+        (seconds as f64 / 3600.0) * self.hourly_rate * people as f64
     }
 }
 
@@ -66,7 +74,10 @@ const SELECT_PROJECT: &str = "
            p.created_at, p.archived, p.archived_at, p.logo_data, p.people_count,
            p.description, p.start_day, p.due_day, p.budget_hours,
            p.active_phase_id, ph.name, ph.color, p.run_device,
-           p.active_feature_id, f.name, f.color
+           p.active_feature_id, f.name, f.color,
+           (SELECT COUNT(*) FROM project_members m WHERE m.project_id = p.id) > 1,
+           COALESCE((SELECT m.role FROM project_members m WHERE m.project_id = p.id
+                     AND m.user_id = (SELECT value FROM sync_meta WHERE key = 'user_id')), 'owner') = 'owner'
     FROM projects p
     LEFT JOIN phases ph ON ph.id = p.active_phase_id
     LEFT JOIN features f ON f.id = p.active_feature_id";
@@ -95,6 +106,8 @@ fn from_row(r: &Row) -> SqlResult<Project> {
         active_feature_id: r.get(19)?,
         active_feature_name: r.get(20)?,
         active_feature_color: r.get(21)?,
+        shared: r.get(22)?,
+        is_owner: r.get(23)?,
     })
 }
 
@@ -184,15 +197,19 @@ impl Db {
         Ok(())
     }
 
-    /// Forgets all tracked time. The schedule (phases, dates) and features are kept.
+    /// Forgets all your tracked time. Teammates' time, the schedule (phases,
+    /// dates) and features are kept.
     pub fn reset_project(&self, id: &str) -> SqlResult<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute(
-            "UPDATE projects SET total_seconds = 0, is_running = 0, run_started_at = NULL, last_alive_at = NULL, run_note = NULL WHERE id = ?1",
+            "UPDATE projects SET is_running = 0, run_started_at = NULL, last_alive_at = NULL, run_note = NULL,
+                total_seconds = (SELECT COALESCE(SUM(seconds), 0) FROM time_entries
+                                 WHERE project_id = ?1 AND user_id IS NOT NULL)
+             WHERE id = ?1",
             params![id],
         )?;
-        tx.execute("DELETE FROM time_entries WHERE project_id = ?1", params![id])?;
+        tx.execute("DELETE FROM time_entries WHERE project_id = ?1 AND user_id IS NULL", params![id])?;
         tx.execute("DELETE FROM daily_totals WHERE project_id = ?1", params![id])?;
         tx.commit()
     }

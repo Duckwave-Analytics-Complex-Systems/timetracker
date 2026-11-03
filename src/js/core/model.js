@@ -16,9 +16,14 @@ export function liveSeconds(p, now = Date.now()) {
   return p.total_seconds + openSessionSeconds(p, now);
 }
 
+/** The multiplier on a bill. A shared project's hours already come from each person. */
+export function billedPeople(p) {
+  return p.shared ? 1 : Math.max(1, p.people_count || 1);
+}
+
 /** Bill = hours x hourly_rate x people_count. Mirrors `Project::bill` in db/projects.rs. */
 export function bill(p, seconds) {
-  return (seconds / 3600) * (p.hourly_rate || 0) * Math.max(1, p.people_count || 1);
+  return (seconds / 3600) * (p.hourly_rate || 0) * billedPeople(p);
 }
 
 /**

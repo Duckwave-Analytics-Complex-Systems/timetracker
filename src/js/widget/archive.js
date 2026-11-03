@@ -40,8 +40,10 @@ listEl.addEventListener('click', (e) => {
       menuBtn,
       [
         { action: 'open', label: 'Open project' },
-        { action: 'restore', label: 'Restore to projects' },
-        { action: 'delete', label: 'Delete', danger: true },
+        ...(p.is_owner ? [
+          { action: 'restore', label: 'Restore to projects' },
+          { action: 'delete', label: 'Delete', danger: true },
+        ] : []),
       ],
       (action) => {
         if (action === 'open') api.openProjectWindow(p.id);

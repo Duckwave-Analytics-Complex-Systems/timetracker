@@ -16,6 +16,13 @@
 //! Applying a remote entry adjusts both by the difference it makes, exactly
 //! like `pause_one` does when it books a session.
 //!
+//! **Sharing.** `time_entries.user_id` is NULL for your own time and otherwise
+//! names the teammate. Their entries count in `total_seconds` but not in
+//! `daily_totals`, which drives your Today and Stats, and never enter the
+//! outbox. The active phase and feature are per person: they sync as
+//! `member_state`, not on the project row. `project_members` is refreshed from
+//! the server every cycle (`apply_members`).
+//!
 //! **Timer.** Not a row: see `reconcile_timer` and `push_timer()` in the
 //! server schema.
 //!
@@ -24,7 +31,7 @@
 //! and timers are reconciled, must be made there too.
 
 use super::days::{record_daily, unrecord_daily};
-use super::timer::{pause_one, session_id};
+use super::timer::{entry_id, pause_one};
 use super::Db;
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use serde::Deserialize;
@@ -34,7 +41,7 @@ use serde_json::{json, Value};
 /// The Android app creates identical tables and triggers.
 pub(super) const SYNC_TABLES: &str = "
     CREATE TABLE IF NOT EXISTS sync_outbox (
-        entity  TEXT NOT NULL,                   -- 'project' | 'feature' | 'phase' | 'entry'
+        entity  TEXT NOT NULL,                   -- 'project' | 'feature' | 'phase' | 'member_state' | 'entry'
         id      TEXT NOT NULL,
         seq     INTEGER NOT NULL,
         PRIMARY KEY (entity, id)
@@ -51,9 +58,14 @@ pub(super) const SYNC_TABLES: &str = "
     DROP TRIGGER IF EXISTS sync_project_upd;
     CREATE TRIGGER sync_project_upd AFTER UPDATE OF
         name, hourly_rate, archived, archived_at, logo_data, people_count,
-        description, start_day, due_day, budget_hours, active_phase_id, active_feature_id ON projects
+        description, start_day, due_day, budget_hours ON projects
     WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
         INSERT OR REPLACE INTO sync_outbox VALUES ('project', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
+    END;
+    -- Per person, so not on the project row. The outbox id is the project's.
+    CREATE TRIGGER IF NOT EXISTS sync_member_state_upd AFTER UPDATE OF active_phase_id, active_feature_id ON projects
+    WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
+        INSERT OR REPLACE INTO sync_outbox VALUES ('member_state', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
     CREATE TRIGGER IF NOT EXISTS sync_project_del AFTER DELETE ON projects
     WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
@@ -86,16 +98,21 @@ pub(super) const SYNC_TABLES: &str = "
         INSERT OR REPLACE INTO sync_outbox VALUES ('feature', OLD.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
 
-    CREATE TRIGGER IF NOT EXISTS sync_entry_ins AFTER INSERT ON time_entries
-    WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
+    -- Only your own entries: a teammate's can't be changed from here. Dropped
+    -- first so existing databases pick up the condition.
+    DROP TRIGGER IF EXISTS sync_entry_ins;
+    DROP TRIGGER IF EXISTS sync_entry_upd;
+    DROP TRIGGER IF EXISTS sync_entry_del;
+    CREATE TRIGGER sync_entry_ins AFTER INSERT ON time_entries
+    WHEN NEW.user_id IS NULL AND NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
         INSERT OR REPLACE INTO sync_outbox VALUES ('entry', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
-    CREATE TRIGGER IF NOT EXISTS sync_entry_upd AFTER UPDATE ON time_entries
-    WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
+    CREATE TRIGGER sync_entry_upd AFTER UPDATE ON time_entries
+    WHEN NEW.user_id IS NULL AND NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
         INSERT OR REPLACE INTO sync_outbox VALUES ('entry', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
-    CREATE TRIGGER IF NOT EXISTS sync_entry_del AFTER DELETE ON time_entries
-    WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
+    CREATE TRIGGER sync_entry_del AFTER DELETE ON time_entries
+    WHEN OLD.user_id IS NULL AND NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
         INSERT OR REPLACE INTO sync_outbox VALUES ('entry', OLD.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
 ";
@@ -106,18 +123,20 @@ pub enum Entity {
     Project,
     Feature,
     Phase,
+    MemberState,
     Entry,
 }
 
 impl Entity {
     /// Push and pull order: parents first.
-    pub const ALL: [Entity; 4] = [Entity::Project, Entity::Feature, Entity::Phase, Entity::Entry];
+    pub const ALL: [Entity; 5] = [Entity::Project, Entity::Feature, Entity::Phase, Entity::MemberState, Entity::Entry];
 
     pub fn key(self) -> &'static str {
         match self {
             Entity::Project => "project",
             Entity::Feature => "feature",
             Entity::Phase => "phase",
+            Entity::MemberState => "member_state",
             Entity::Entry => "entry",
         }
     }
@@ -127,9 +146,30 @@ impl Entity {
             Entity::Project => "projects",
             Entity::Feature => "features",
             Entity::Phase => "phases",
+            Entity::MemberState => "member_state",
             Entity::Entry => "time_entries",
         }
     }
+}
+
+/// One person in a project, from the server's `my_memberships()`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Member {
+    pub project_id: String,
+    pub user_id: String,
+    pub role: String,
+    pub display_name: String,
+}
+
+/// A row of the "Hours by person" table. `user_id` is `None` for time tracked
+/// by people who have since left the project, added up as one row.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct MemberHours {
+    pub user_id: Option<String>,
+    pub display_name: String,
+    pub role: String,
+    pub is_me: bool,
+    pub seconds: i64,
 }
 
 /// One outbox entry ready to push. `row` is `None` for a tombstone.
@@ -199,6 +239,11 @@ fn is_pending(conn: &Connection, entity: Entity, id: &str) -> SqlResult<bool> {
     .map(|r| r.is_some())
 }
 
+/// The account this device's data belongs to.
+fn linked_user(conn: &Connection) -> SqlResult<Option<String>> {
+    conn.query_row("SELECT value FROM sync_meta WHERE key = 'user_id'", [], |r| r.get(0)).optional()
+}
+
 fn project_exists(conn: &Connection, id: &str) -> SqlResult<bool> {
     conn.query_row("SELECT 1 FROM projects WHERE id = ?1", params![id], |_| Ok(()))
         .optional()
@@ -222,7 +267,7 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
         Entity::Project => conn
             .query_row(
                 "SELECT id, name, hourly_rate, created_at, archived, archived_at, logo_data, people_count,
-                        description, start_day, due_day, budget_hours, active_phase_id, active_feature_id
+                        description, start_day, due_day, budget_hours
                  FROM projects WHERE id = ?1",
                 params![id],
                 |r| {
@@ -239,8 +284,6 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
                         "start_day": r.get::<_, Option<String>>(9)?,
                         "due_day": r.get::<_, Option<String>>(10)?,
                         "budget_hours": r.get::<_, Option<f64>>(11)?,
-                        "active_phase_id": r.get::<_, Option<String>>(12)?,
-                        "active_feature_id": r.get::<_, Option<String>>(13)?,
                         "deleted": false,
                     }))
                 },
@@ -288,6 +331,26 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
                 },
             )
             .optional(),
+        // A project that's gone has no state to send: `row` is None, and the
+        // pusher sends no tombstone for this entity.
+        Entity::MemberState => {
+            let user = linked_user(conn)?.unwrap_or_default();
+            conn.query_row(
+                "SELECT id, active_phase_id, active_feature_id FROM projects WHERE id = ?1",
+                params![id],
+                |r| {
+                    let project_id: String = r.get(0)?;
+                    Ok(json!({
+                        "id": format!("{project_id}:{user}"),
+                        "project_id": project_id,
+                        "active_phase_id": r.get::<_, Option<String>>(1)?,
+                        "active_feature_id": r.get::<_, Option<String>>(2)?,
+                        "deleted": false,
+                    }))
+                },
+            )
+            .optional()
+        }
         Entity::Entry => conn
             .query_row(
                 "SELECT id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note FROM time_entries WHERE id = ?1",
@@ -312,13 +375,16 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
 
 // ---------------------------------------------------------------- applying remote rows
 
-/// Adds (`sign = 1`) or removes (`sign = -1`) a booked span from the derived totals.
-fn adjust_totals(conn: &Connection, project_id: &str, start_ts: i64, seconds: i64, sign: i64) -> SqlResult<()> {
+/// Adds (`sign = 1`) or removes (`sign = -1`) a booked span from the derived
+/// totals. `daily_totals` counts only your own time.
+fn adjust_totals(conn: &Connection, project_id: &str, start_ts: i64, seconds: i64, sign: i64, mine: bool) -> SqlResult<()> {
     conn.execute(
         "UPDATE projects SET total_seconds = MAX(0, total_seconds + ?1) WHERE id = ?2",
         params![sign * seconds, project_id],
     )?;
-    if sign > 0 {
+    if !mine {
+        Ok(())
+    } else if sign > 0 {
         record_daily(conn, project_id, start_ts / 1000, seconds)
     } else {
         unrecord_daily(conn, project_id, start_ts / 1000, seconds)
@@ -336,16 +402,14 @@ fn apply_project(conn: &Connection, v: &Value) -> SqlResult<bool> {
     }
     conn.execute(
         "INSERT INTO projects (id, name, hourly_rate, created_at, archived, archived_at, logo_data,
-                               people_count, description, start_day, due_day, budget_hours, active_phase_id,
-                               active_feature_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                               people_count, description, start_day, due_day, budget_hours)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, hourly_rate = excluded.hourly_rate, created_at = excluded.created_at,
             archived = excluded.archived, archived_at = excluded.archived_at, logo_data = excluded.logo_data,
             people_count = excluded.people_count, description = excluded.description,
             start_day = excluded.start_day, due_day = excluded.due_day,
-            budget_hours = excluded.budget_hours, active_phase_id = excluded.active_phase_id,
-            active_feature_id = excluded.active_feature_id",
+            budget_hours = excluded.budget_hours",
         params![
             id,
             s(v, "name").unwrap_or_default(),
@@ -359,8 +423,6 @@ fn apply_project(conn: &Connection, v: &Value) -> SqlResult<bool> {
             s(v, "start_day"),
             s(v, "due_day"),
             f(v, "budget_hours"),
-            s(v, "active_phase_id"),
-            s(v, "active_feature_id"),
         ],
     )?;
     Ok(true)
@@ -440,23 +502,37 @@ fn apply_phase(conn: &Connection, v: &Value) -> SqlResult<bool> {
     Ok(true)
 }
 
+/// Your active phase and feature, as chosen on another of your devices.
+fn apply_member_state(conn: &Connection, v: &Value) -> SqlResult<bool> {
+    let Some(project_id) = s(v, "project_id") else { return Ok(false) };
+    if b(v, "deleted") || is_pending(conn, Entity::MemberState, &project_id)? {
+        return Ok(false);
+    }
+    let changed = conn.execute(
+        "UPDATE projects SET active_phase_id = ?1, active_feature_id = ?2
+         WHERE id = ?3 AND (active_phase_id IS NOT ?1 OR active_feature_id IS NOT ?2)",
+        params![s(v, "active_phase_id"), s(v, "active_feature_id"), project_id],
+    )?;
+    Ok(changed > 0)
+}
+
 fn apply_entry(conn: &Connection, v: &Value) -> SqlResult<bool> {
     let Some(id) = s(v, "id") else { return Ok(false) };
     if is_pending(conn, Entity::Entry, &id)? {
         return Ok(false);
     }
     #[allow(clippy::type_complexity)]
-    let old: Option<(String, i64, i64, Option<String>, Option<String>, Option<String>)> = conn
+    let old: Option<(String, i64, i64, Option<String>, Option<String>, Option<String>, Option<String>)> = conn
         .query_row(
-            "SELECT project_id, start_ts, seconds, phase_id, feature_id, note FROM time_entries WHERE id = ?1",
+            "SELECT project_id, start_ts, seconds, phase_id, feature_id, note, user_id FROM time_entries WHERE id = ?1",
             params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
         )
         .optional()?;
 
     if b(v, "deleted") {
-        let Some((project_id, start_ts, seconds, _, _, _)) = old else { return Ok(false) };
-        adjust_totals(conn, &project_id, start_ts, seconds, -1)?;
+        let Some((project_id, start_ts, seconds, _, _, _, user)) = old else { return Ok(false) };
+        adjust_totals(conn, &project_id, start_ts, seconds, -1, user.is_none())?;
         conn.execute("DELETE FROM time_entries WHERE id = ?1", params![id])?;
         return Ok(true);
     }
@@ -472,27 +548,29 @@ fn apply_entry(conn: &Connection, v: &Value) -> SqlResult<bool> {
     let phase_id = s(v, "phase_id");
     let feature_id = s(v, "feature_id");
     let note = s(v, "note");
+    // NULL means it's yours.
+    let user = s(v, "user_id").filter(|u| Some(u) != linked_user(conn).ok().flatten().as_ref());
     match old {
-        Some(o) if o == (project_id.clone(), start_ts, seconds, phase_id.clone(), feature_id.clone(), note.clone()) => return Ok(false),
-        Some((old_project, old_start, old_seconds, _, _, _)) => {
-            if (old_project.as_str(), old_start, old_seconds) != (project_id.as_str(), start_ts, seconds) {
-                adjust_totals(conn, &old_project, old_start, old_seconds, -1)?;
-                adjust_totals(conn, &project_id, start_ts, seconds, 1)?;
+        Some(o) if o == (project_id.clone(), start_ts, seconds, phase_id.clone(), feature_id.clone(), note.clone(), user.clone()) => return Ok(false),
+        Some((old_project, old_start, old_seconds, _, _, _, old_user)) => {
+            if (old_project.as_str(), old_start, old_seconds) != (project_id.as_str(), start_ts, seconds) || old_user != user {
+                adjust_totals(conn, &old_project, old_start, old_seconds, -1, old_user.is_none())?;
+                adjust_totals(conn, &project_id, start_ts, seconds, 1, user.is_none())?;
             }
             conn.execute(
                 "UPDATE time_entries SET project_id = ?1, start_ts = ?2, end_ts = ?3, seconds = ?4, phase_id = ?5,
-                                         feature_id = ?6, note = ?7
-                 WHERE id = ?8",
-                params![project_id, start_ts, end_ts, seconds, phase_id, feature_id, note, id],
+                                         feature_id = ?6, note = ?7, user_id = ?8
+                 WHERE id = ?9",
+                params![project_id, start_ts, end_ts, seconds, phase_id, feature_id, note, user, id],
             )?;
         }
         None => {
             conn.execute(
-                "INSERT INTO time_entries (id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note],
+                "INSERT INTO time_entries (id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note, user_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note, user],
             )?;
-            adjust_totals(conn, &project_id, start_ts, seconds, 1)?;
+            adjust_totals(conn, &project_id, start_ts, seconds, 1, user.is_none())?;
         }
     }
     Ok(true)
@@ -559,6 +637,7 @@ impl Db {
             "INSERT OR IGNORE INTO sync_outbox (entity, id, seq) SELECT 'project', id, 0 FROM projects;
              INSERT OR IGNORE INTO sync_outbox (entity, id, seq) SELECT 'feature', id, 0 FROM features;
              INSERT OR IGNORE INTO sync_outbox (entity, id, seq) SELECT 'phase', id, 0 FROM phases;
+             INSERT OR IGNORE INTO sync_outbox (entity, id, seq) SELECT 'member_state', id, 0 FROM projects;
              INSERT OR IGNORE INTO sync_outbox (entity, id, seq) SELECT 'entry', id, 0 FROM time_entries;",
         )
     }
@@ -604,11 +683,135 @@ impl Db {
                     Entity::Project => apply_project(c, v)?,
                     Entity::Feature => apply_feature(c, v)?,
                     Entity::Phase => apply_phase(c, v)?,
+                    Entity::MemberState => apply_member_state(c, v)?,
                     Entity::Entry => apply_entry(c, v)?,
                 };
             }
             Ok(changed)
         })
+    }
+
+    // ---- members
+
+    /// Projects whose members are known here, so a project that's new in
+    /// `my_memberships()` can be told apart and its history fetched.
+    pub fn member_projects(&self) -> SqlResult<Vec<String>> {
+        self.conn()
+            .prepare("SELECT DISTINCT project_id FROM project_members")?
+            .query_map([], |r| r.get(0))?
+            .collect()
+    }
+
+    /// Replaces the member lists with the server's. A project you were in and no
+    /// longer are (removed, left or deleted) is forgotten here, and nothing about
+    /// that goes up: its time stays on the server. Returns true if anything changed.
+    pub fn apply_members(&self, members: &[Member]) -> SqlResult<bool> {
+        let mut conn = self.conn();
+        muted(&mut conn, |c| {
+            let known: Vec<String> = c
+                .prepare("SELECT DISTINCT project_id FROM project_members")?
+                .query_map([], |r| r.get(0))?
+                .collect::<SqlResult<_>>()?;
+            let mut changed = false;
+            for project_id in known.iter().filter(|p| !members.iter().any(|m| &m.project_id == *p)) {
+                changed |= c.execute("DELETE FROM projects WHERE id = ?1", params![project_id])? > 0;
+                c.execute("DELETE FROM sync_outbox WHERE entity IN ('project', 'member_state') AND id = ?1", params![project_id])?;
+            }
+            let before: i64 = c.query_row("SELECT COUNT(*) FROM project_members", [], |r| r.get(0))?;
+            let mut same = true;
+            for m in members {
+                same &= c.query_row(
+                    "SELECT 1 FROM project_members WHERE project_id = ?1 AND user_id = ?2 AND role = ?3 AND display_name = ?4",
+                    params![m.project_id, m.user_id, m.role, m.display_name],
+                    |_| Ok(()),
+                ).optional()?.is_some() || !project_exists(c, &m.project_id)?;
+            }
+            c.execute("DELETE FROM project_members", [])?;
+            for m in members {
+                if project_exists(c, &m.project_id)? {
+                    c.execute(
+                        "INSERT INTO project_members (project_id, user_id, role, display_name) VALUES (?1, ?2, ?3, ?4)",
+                        params![m.project_id, m.user_id, m.role, m.display_name],
+                    )?;
+                }
+            }
+            let after: i64 = c.query_row("SELECT COUNT(*) FROM project_members", [], |r| r.get(0))?;
+            Ok(changed || !same || before != after)
+        })
+    }
+
+    /// Who has worked on a project, for the Team tab: every member, plus one row
+    /// for anyone who has left. Empty if the project has never synced.
+    pub fn member_hours(&self, project_id: &str) -> SqlResult<Vec<MemberHours>> {
+        let conn = self.conn();
+        let me = linked_user(&conn)?;
+        let mut rows: Vec<MemberHours> = conn
+            .prepare(
+                "SELECT m.user_id, m.display_name, m.role,
+                        (SELECT COALESCE(SUM(e.seconds), 0) FROM time_entries e WHERE e.project_id = m.project_id
+                         AND COALESCE(e.user_id, ?2) = m.user_id)
+                 FROM project_members m WHERE m.project_id = ?1 ORDER BY m.role DESC, m.display_name",
+            )?
+            .query_map(params![project_id, me], |r| {
+                let user_id: String = r.get(0)?;
+                Ok(MemberHours {
+                    is_me: Some(&user_id) == me.as_ref(),
+                    user_id: Some(user_id),
+                    display_name: r.get(1)?,
+                    role: r.get(2)?,
+                    seconds: r.get(3)?,
+                })
+            })?
+            .collect::<SqlResult<_>>()?;
+        if !rows.is_empty() {
+            let total: i64 = conn.query_row(
+                "SELECT COALESCE(SUM(seconds), 0) FROM time_entries WHERE project_id = ?1",
+                params![project_id],
+                |r| r.get(0),
+            )?;
+            let former = total - rows.iter().map(|m| m.seconds).sum::<i64>();
+            if former > 0 {
+                rows.push(MemberHours {
+                    user_id: None,
+                    display_name: "Former members".into(),
+                    role: "former".into(),
+                    is_me: false,
+                    seconds: former,
+                });
+            }
+        }
+        Ok(rows)
+    }
+
+    /// Books a session still running on a project filed since it started (by the
+    /// owner, on another device), so a timer can't keep counting out of sight.
+    /// Not muted: it's a session the server must get. Returns true if one closed.
+    pub fn stop_filed_timers(&self, now: i64) -> SqlResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let running: Vec<String> = tx
+            .prepare("SELECT id FROM projects WHERE is_running = 1 AND archived = 1")?
+            .query_map([], |r| r.get(0))?
+            .collect::<SqlResult<_>>()?;
+        for id in &running {
+            pause_one(&tx, id, now)?;
+        }
+        tx.commit()?;
+        Ok(!running.is_empty())
+    }
+
+    /// Whether this device's user owns a project. True for one never synced.
+    pub fn is_owner(&self, project_id: &str) -> SqlResult<bool> {
+        let conn = self.conn();
+        let me = linked_user(&conn)?;
+        let role: Option<String> = conn
+            .query_row(
+                "SELECT role FROM project_members WHERE project_id = ?1 AND user_id = ?2",
+                params![project_id, me],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(role.map_or(true, |r| r == "owner"))
     }
 
     // ---- timer
@@ -636,7 +839,7 @@ impl Db {
                 let ended_at: Option<i64> = conn
                     .query_row(
                         "SELECT end_ts FROM time_entries WHERE id = ?1",
-                        params![session_id(&project_id, started_at)],
+                        params![entry_id(&conn, &project_id, started_at)?],
                         |r| r.get(0),
                     )
                     .optional()?;

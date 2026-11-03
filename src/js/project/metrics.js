@@ -52,7 +52,7 @@ export function sessionRows({ sessions, phases, features }) {
   return sessions.map((s) => ({ ...s, phaseName: nameOf(phases, s.phase_id), featureName: nameOf(features, s.feature_id) }));
 }
 
-export function withLiveTime({ project, phases, features, sessions, daily }, now = Date.now()) {
+export function withLiveTime({ project, phases, features, sessions, daily, members }, now = Date.now()) {
   const open = openSessionSeconds(project, now);
   const livePhases = phases.map((ph) =>
     open && ph.id === project.active_phase_id ? { ...ph, spent_seconds: ph.spent_seconds + open } : ph);
@@ -61,7 +61,8 @@ export function withLiveTime({ project, phases, features, sessions, daily }, now
   const byDay = new Map(daily.map((d) => [d.day, d.seconds]));
   for (const [day, , s] of liveAdditions([project], now)) byDay.set(day, (byDay.get(day) || 0) + s);
   const liveDaily = [...byDay].sort(([a], [b]) => (a < b ? -1 : 1)).map(([day, seconds]) => ({ day, seconds }));
-  return { project, phases: livePhases, features: liveFeatures, sessions, daily: liveDaily, totalSeconds: liveSeconds(project, now) };
+  const liveMembers = members.map((m) => (open && m.is_me ? { ...m, seconds: m.seconds + open } : m));
+  return { project, phases: livePhases, features: liveFeatures, sessions, daily: liveDaily, members: liveMembers, totalSeconds: liveSeconds(project, now) };
 }
 
 /** Share of a phase the schedule expects done at the *start* of `day` (0..1). */

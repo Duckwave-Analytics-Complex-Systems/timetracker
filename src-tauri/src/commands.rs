@@ -4,7 +4,7 @@
 //! `notify` the windows when data changed. JS calls these through
 //! js/core/api.js, which is the only place `invoke` names appear.
 
-use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session};
+use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session};
 use crate::events::{notify, Change};
 use crate::sync::{self as cloud, SyncStatus};
 use crate::{now_ms, watchdog};
@@ -16,6 +16,15 @@ type CmdResult<T> = Result<T, String>;
 
 fn msg(e: impl ToString) -> String {
     e.to_string()
+}
+
+/// The project row belongs to its owner: the server refuses anyone else's change.
+fn owner_only(db: &Db, id: &str) -> CmdResult<()> {
+    if db.is_owner(id).map_err(msg)? {
+        Ok(())
+    } else {
+        Err("Only the project owner can change this.".into())
+    }
 }
 
 // ---------------------------------------------------------------- projects
@@ -39,6 +48,7 @@ pub fn add_project(app: AppHandle, db: State<Db>, name: String, hourly_rate: f64
 
 #[tauri::command]
 pub fn update_project(app: AppHandle, db: State<Db>, id: String, name: String, hourly_rate: f64, people_count: i64) -> CmdResult<()> {
+    owner_only(&db, &id)?;
     db.update_project(&id, name.trim(), hourly_rate, people_count).map_err(msg)?;
     notify(&app, Change::Projects);
     Ok(())
@@ -46,6 +56,7 @@ pub fn update_project(app: AppHandle, db: State<Db>, id: String, name: String, h
 
 #[tauri::command]
 pub fn set_project_logo(app: AppHandle, db: State<Db>, id: String, data_url: Option<String>) -> CmdResult<()> {
+    owner_only(&db, &id)?;
     db.set_logo(&id, data_url).map_err(msg)?;
     notify(&app, Change::Projects);
     Ok(())
@@ -54,6 +65,7 @@ pub fn set_project_logo(app: AppHandle, db: State<Db>, id: String, data_url: Opt
 /// "File" a project: it leaves the main list but keeps all its history.
 #[tauri::command]
 pub fn archive_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<()> {
+    owner_only(&db, &id)?;
     db.set_archived(&id, true, now_ms()).map_err(msg)?;
     notify(&app, Change::Projects);
     Ok(())
@@ -61,6 +73,7 @@ pub fn archive_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<(
 
 #[tauri::command]
 pub fn restore_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<()> {
+    owner_only(&db, &id)?;
     db.set_archived(&id, false, now_ms()).map_err(msg)?;
     notify(&app, Change::Projects);
     Ok(())
@@ -68,6 +81,7 @@ pub fn restore_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<(
 
 #[tauri::command]
 pub fn delete_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<()> {
+    owner_only(&db, &id)?;
     db.delete_project(&id).map_err(msg)?;
     if let Some(w) = app.get_webview_window(&project_window_label(&id)) {
         let _ = w.close();
@@ -139,6 +153,7 @@ pub struct ProjectDetail {
     features: Vec<Feature>,
     sessions: Vec<Session>,
     daily: Vec<DayTotal>,
+    members: Vec<MemberHours>,
 }
 
 #[tauri::command]
@@ -150,11 +165,13 @@ pub fn get_project_detail(db: State<Db>, id: String) -> CmdResult<ProjectDetail>
         features: db.list_features(&id).map_err(msg)?,
         sessions: db.list_sessions(&id).map_err(msg)?,
         daily: db.project_daily(&id).map_err(msg)?,
+        members: db.member_hours(&id).map_err(msg)?,
     })
 }
 
 #[tauri::command]
 pub fn update_project_plan(app: AppHandle, db: State<Db>, id: String, plan: PlanInput) -> CmdResult<()> {
+    owner_only(&db, &id)?;
     db.update_plan(&id, &plan).map_err(msg)?;
     notify(&app, Change::Schedule);
     Ok(())
@@ -267,6 +284,25 @@ pub async fn cloud_sync_now(app: AppHandle) -> CmdResult<SyncStatus> {
     })
     .await
     .map_err(msg)
+}
+
+/// Your name on shared projects.
+#[tauri::command]
+pub async fn cloud_set_display_name(app: AppHandle, name: String) -> CmdResult<SyncStatus> {
+    let status = tauri::async_runtime::spawn_blocking(move || cloud::set_display_name(&app, &name)).await.map_err(msg)??;
+    Ok(status)
+}
+
+/// Adds someone to a project by their share code. Returns their name.
+#[tauri::command]
+pub async fn cloud_add_member(app: AppHandle, project_id: String, share_code: String) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || cloud::add_member(&app, &project_id, &share_code)).await.map_err(msg)?
+}
+
+/// Removes someone from a project. Removing yourself is leaving it.
+#[tauri::command]
+pub async fn cloud_remove_member(app: AppHandle, project_id: String, user_id: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || cloud::remove_member(&app, &project_id, &user_id)).await.map_err(msg)?
 }
 
 // ---------------------------------------------------------------- windows

@@ -88,6 +88,9 @@ fn main() {
             commands::cloud_sign_in,
             commands::cloud_sign_out,
             commands::cloud_sync_now,
+            commands::cloud_set_display_name,
+            commands::cloud_add_member,
+            commands::cloud_remove_member,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

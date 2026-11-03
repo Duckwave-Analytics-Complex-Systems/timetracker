@@ -159,6 +159,28 @@ All data belongs to an account, not to a computer:
   again.
 - **Signing out** syncs one last time and keeps the data on the device.
 
+### Sharing a project
+
+Everyone needs an account on the same Supabase project. Your share code is in
+Settings ☰ → Cloud sync. To add someone, the project's owner opens the project's
+**Team** tab and enters that person's code.
+
+- **The owner** changes the project's name, rate, plan and logo, files or deletes
+  it, and adds or removes people.
+- **Any member** can change phases and features.
+- **Everyone** tracks their own time with their own timer, phase and feature, and
+  edits only their own notes. Resetting removes only your own time.
+- **Totals:** the project's total and charts count everyone. Today and Stats show
+  only your own time.
+- **Billing:** a shared project bills total hours × the owner's rate. "People
+  billing this project" is ignored while it's shared, so its bill can drop when
+  you add someone.
+- **Leaving:** someone removed from a project, or who leaves, loses it from their
+  devices. The time they tracked stays on the project.
+
+Other people's running timers aren't shown: their time appears when each session
+closes and syncs. Don't share a project until your Android app is up to date.
+
 ## How it works
 
 - **Single active timer**: `Db::start_project` pauses whatever is running and
@@ -228,6 +250,8 @@ timetrack/
 - Optional sync through your own Supabase project, between computers and
   with the companion Android app. See [Cloud sync](#cloud-sync).
 - The widget shows when a timer is running on another device.
+- Share a project with other people by their share code. See
+  [Sharing a project](#sharing-a-project).
 
 ### v5.0.0: projects, schedules and reports
 

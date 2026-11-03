@@ -6,7 +6,7 @@
 //!   run every time. Add the column to the `CREATE TABLE` below as well, so
 //!   fresh databases match migrated ones.
 //! - **Data** migrations run once, guarded by `PRAGMA user_version`. Add a new
-//!   `if version < N` block at the end of `migrate` (currently at 5).
+//!   `if version < N` block at the end of `migrate` (currently at 6).
 
 use super::days::record_daily;
 use rusqlite::{params, Connection, Result as SqlResult};
@@ -45,7 +45,18 @@ const TABLES: &str = "
         seconds     INTEGER NOT NULL,
         phase_id    TEXT,                            -- v5, NULL = unassigned
         feature_id  TEXT,                            -- v6, NULL = unassigned
-        note        TEXT                             -- v6, what was done in this session
+        note        TEXT,                            -- v6, what was done in this session
+        user_id     TEXT                             -- v6, NULL = tracked by this device's user
+    );
+
+    -- v6: who is in each project, refreshed from the server on every sync. Never
+    -- pushed. A project with no rows here hasn't been synced, and is yours alone.
+    CREATE TABLE IF NOT EXISTS project_members (
+        project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        user_id      TEXT NOT NULL,
+        role         TEXT NOT NULL,                  -- 'owner' | 'member'
+        display_name TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (project_id, user_id)
     );
 
     -- v4: tracked seconds per local day per project (drives Today + Stats).
@@ -114,6 +125,7 @@ pub(super) fn migrate(conn: &mut Connection) -> SqlResult<()> {
     ensure_column(conn, "time_entries", "feature_id", "TEXT")?; // v6
     ensure_column(conn, "projects", "run_note", "TEXT")?; // v6
     ensure_column(conn, "time_entries", "note", "TEXT")?; // v6
+    ensure_column(conn, "time_entries", "user_id", "TEXT")?; // v6
 
     conn.execute_batch(INDEXES)?;
     conn.execute_batch(super::sync::SYNC_TABLES)?; // v6
@@ -131,7 +143,18 @@ pub(super) fn migrate(conn: &mut Connection) -> SqlResult<()> {
         tx.pragma_update(None, "user_version", 5)?;
         tx.commit()?;
     }
-    // Next data migration: `if version < 6 { ... user_version = 6 }`.
+    if version < 6 {
+        // The active phase and feature moved from the project row to member_state:
+        // an account that's already linked uploads its current choices once.
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            "INSERT OR IGNORE INTO sync_outbox (entity, id, seq)
+             SELECT 'member_state', id, 0 FROM projects WHERE EXISTS (SELECT 1 FROM sync_meta WHERE key = 'user_id');",
+        )?;
+        tx.pragma_update(None, "user_version", 6)?;
+        tx.commit()?;
+    }
+    // Next data migration: `if version < 7 { ... user_version = 7 }`.
     Ok(())
 }
 

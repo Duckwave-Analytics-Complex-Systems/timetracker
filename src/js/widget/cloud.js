@@ -20,8 +20,14 @@ function render() {
   $('cloudSignedOut').classList.toggle('hidden', !!s.signed_in);
   if (s.signed_in) {
     const last = s.last_sync_at ? `Last synced at ${fmtTime(s.last_sync_at)}.` : 'Not synced yet.';
+    const refused = s.refused_changes ? `<br>${s.refused_changes} change(s) were refused by the server and undone.` : '';
     $('cloudSummary').innerHTML =
-      `Signed in as <b>${escapeHtml(s.email)}</b><br><span class="muted">${escapeHtml(s.url)}<br>${last}</span>`;
+      `Signed in as <b>${escapeHtml(s.email)}</b><br><span class="muted">${escapeHtml(s.url)}<br>${last}${refused}</span>`;
+  }
+  $('cloudProfile').classList.toggle('hidden', !(s.signed_in && s.profile));
+  if (s.profile) {
+    $('cloudCode').textContent = s.profile.share_code;
+    if (document.activeElement !== $('cloudName')) $('cloudName').value = s.profile.display_name;
   }
   const err = $('cloudError');
   err.textContent = s.last_error || '';
@@ -98,6 +104,28 @@ $('cloudForm').addEventListener('submit', async (e) => {
       password: $('cloudPassword').value,
     }));
   if (ok) $('cloudPassword').value = '';
+});
+
+$('cloudName').addEventListener('change', async () => {
+  const name = $('cloudName').value.trim();
+  if (!name) return render();
+  try {
+    status = await api.cloudSetDisplayName(name);
+    $('cloudName').blur();
+    render();
+  } catch (err) {
+    alert(String(err));
+  }
+});
+
+$('cloudCopyCode').addEventListener('click', async (e) => {
+  try {
+    await navigator.clipboard.writeText($('cloudCode').textContent);
+    e.target.textContent = 'Copied';
+    setTimeout(() => { e.target.textContent = 'Copy'; }, 1500);
+  } catch {
+    window.getSelection().selectAllChildren($('cloudCode')); // the code can still be copied by hand
+  }
 });
 
 $('cloudSyncNow').addEventListener('click', () => run($('cloudSyncNow'), api.cloudSyncNow));

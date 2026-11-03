@@ -216,6 +216,13 @@
       <div id="cloudSignedIn" class="hidden">
         <p class="cloud-summary" id="cloudSummary"></p>
         <p id="cloudError" class="field-error hidden"></p>
+        <div id="cloudProfile" class="hidden">
+          <label class="field"><span>Your name on shared projects</span><input id="cloudName" maxlength="60" autocomplete="off" /></label>
+          <div class="field"><span>Your share code</span>
+            <div class="share-code"><code id="cloudCode"></code><button type="button" id="cloudCopyCode" class="btn-secondary">Copy</button></div>
+          </div>
+          <p class="field-hint">Give this code to a project's owner so they can add you.</p>
+        </div>
         <div class="dialog-actions">
           <button type="button" id="cloudSignOut" class="btn-secondary">Sign out</button>
           <span class="spacer"></span>

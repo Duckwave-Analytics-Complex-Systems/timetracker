@@ -2,7 +2,7 @@
 // logo upload.
 import { api } from '../core/api.js';
 import { escapeHtml, fmtHMS, money } from '../core/format.js';
-import { bill, liveSeconds } from '../core/model.js';
+import { bill, billedPeople, liveSeconds } from '../core/model.js';
 import { toggleTimer } from '../core/session-notes.js';
 import { state, act } from './store.js';
 
@@ -71,7 +71,8 @@ function cardHtml(p, seconds) {
           <span class="status-dot"></span>
           <span>${p.is_running ? (p.run_device ? 'Running on phone' : 'Running') : 'Paused'}</span>
           ${p.hourly_rate ? `<span>·</span><span class="earnings">${money(bill(p, seconds))}</span>` : ''}
-          ${p.people_count > 1 ? `<span>·</span><span class="people-badge">×${p.people_count}</span>` : ''}
+          ${billedPeople(p) > 1 ? `<span>·</span><span class="people-badge">×${billedPeople(p)}</span>` : ''}
+          ${p.shared ? '<span>·</span><span class="people-badge">Shared</span>' : ''}
         </div>
       </div>
     </div>
@@ -123,7 +124,10 @@ const MENU_ACTIONS = {
   },
   'remove-logo': (p) => act(() => api.setLogo(p.id, null)),
   reset: (p) => {
-    if (confirm(`Reset all tracked time for "${p.name}"?\nIts schedule is kept.`)) act(() => api.resetProject(p.id));
+    const question = p.shared
+      ? `Reset your tracked time on "${p.name}"?\nTeammates' time and the schedule are kept.`
+      : `Reset all tracked time for "${p.name}"?\nIts schedule is kept.`;
+    if (confirm(question)) act(() => api.resetProject(p.id));
   },
   archive: (p) => {
     if (confirm(`File "${p.name}"?\nIt leaves this list but keeps all its history. You can restore it from the Archive tab.`)) {
@@ -131,7 +135,8 @@ const MENU_ACTIONS = {
     }
   },
   delete: (p) => {
-    if (confirm(`Delete "${p.name}"? This removes its tracked time and schedule permanently.`)) act(() => api.deleteProject(p.id));
+    const everyone = p.shared ? ` for everyone on it, including their tracked time` : '';
+    if (confirm(`Delete "${p.name}"? This removes its tracked time and schedule permanently${everyone}.`)) act(() => api.deleteProject(p.id));
   },
 };
 
@@ -170,14 +175,18 @@ document.addEventListener('click', () => menuEl.classList.add('hidden'));
 
 function openCardMenu(evt, p) {
   evt.stopPropagation();
-  const items = [
+  // Someone else's project: leaving it is in its Team tab.
+  const items = p.is_owner ? [
     { action: 'open', label: 'Open project' },
     { action: 'edit', label: 'Edit' },
     { action: 'logo', label: 'Change logo' },
     ...(p.logo_data ? [{ action: 'remove-logo', label: 'Remove logo' }] : []),
-    { action: 'reset', label: 'Reset time' },
+    { action: 'reset', label: p.shared ? 'Reset my time' : 'Reset time' },
     { action: 'archive', label: 'File (archive)' },
     { action: 'delete', label: 'Delete', danger: true },
+  ] : [
+    { action: 'open', label: 'Open project' },
+    { action: 'reset', label: 'Reset my time' },
   ];
   openMenu(evt.currentTarget, items, (action) => MENU_ACTIONS[action](p));
 }

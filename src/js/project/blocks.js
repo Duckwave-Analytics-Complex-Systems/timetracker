@@ -2,7 +2,7 @@
 // always show the same numbers the same way. They return markup strings and
 // are styled by css/project.css (app, dark) and report-style.js (report, light).
 import { escapeHtml, fmtDate, fmtDay, fmtHM, fmtHours, fmtTime, money, pct } from '../core/format.js';
-import { bill } from '../core/model.js';
+import { bill, billedPeople } from '../core/model.js';
 import { HEALTH, isMilestone, phaseStatusLabel } from './metrics.js';
 
 export const pill = (tone, text) => `<span class="pill tone-${tone}">${escapeHtml(text)}</span>`;
@@ -43,7 +43,7 @@ export function kpiTilesHtml(m, project, totalSeconds) {
       m.forecastFinish && m.due && m.forecastFinish > m.due ? 'warn' : ''),
   ];
   if (project.hourly_rate > 0) {
-    const people = project.people_count > 1 ? ` × ${project.people_count} people` : '';
+    const people = billedPeople(project) > 1 ? ` × ${billedPeople(project)} people` : '';
     tiles.push(tile('Billed to date', money(bill(project, totalSeconds)), `${money(project.hourly_rate)}/h${people}`, 'money'));
   }
   return `<div class="kpis">${tiles.join('')}</div>`;
@@ -122,12 +122,17 @@ export function phaseTableHtml(m) {
     </div>`;
 }
 
-/** Closed sessions (`sessionRows`). With `editable`, rows carry the id the History tab clicks on. */
+/**
+ * Closed sessions (`sessionRows`). With `editable`, your rows carry the id the
+ * History tab clicks on. A project with several people gets a Person column.
+ */
 export function sessionTableHtml(rows, { editable = false } = {}) {
+  const showPerson = rows.some((s) => s.user_name);
   const body = rows.map((s) => `
-    <tr${editable ? ` class="row-link" data-session="${escapeHtml(s.id)}" title="Edit note"` : ''}>
+    <tr${editable && s.mine ? ` class="row-link" data-session="${escapeHtml(s.id)}" title="Edit note"` : ''}>
       <td class="nowrap">${fmtDate(new Date(s.start_ts))}</td>
       <td class="nowrap">${fmtTime(s.start_ts)} – ${fmtTime(s.end_ts)}</td>
+      ${showPerson ? `<td>${escapeHtml(s.user_name ?? '')}</td>` : ''}
       <td class="num">${fmtHM(s.seconds)}</td>
       <td>${escapeHtml(s.phaseName)}</td>
       <td>${escapeHtml(s.featureName)}</td>
@@ -136,7 +141,7 @@ export function sessionTableHtml(rows, { editable = false } = {}) {
   return `
     <div class="table-wrap">
       <table class="ptable">
-        <thead><tr><th>Date</th><th>Time</th><th class="num">Tracked</th><th>Phase</th><th>Feature</th><th>Note</th></tr></thead>
+        <thead><tr><th>Date</th><th>Time</th>${showPerson ? '<th>Person</th>' : ''}<th class="num">Tracked</th><th>Phase</th><th>Feature</th><th>Note</th></tr></thead>
         <tbody>${body.join('')}</tbody>
       </table>
     </div>`;
@@ -164,6 +169,26 @@ export function featureTableHtml(m, { editable = false } = {}) {
         <thead><tr><th>Feature</th><th class="num">Tracked</th><th class="num">Share</th></tr></thead>
         <tbody>${rows.join('')}</tbody>
         <tfoot><tr><td>Total</td><td class="num">${fmtHours(m.spentH)}</td><td></td></tr></tfoot>
+      </table>
+    </div>`;
+}
+
+/** Hours per person. With `removable`, rows have the Team tab's Remove button. */
+export function memberTableHtml(members, totalSeconds, { removable = false } = {}) {
+  const roles = { owner: 'Owner', member: 'Member', former: '' };
+  const rows = members.map((m) => `
+    <tr>
+      <td>${escapeHtml(m.display_name)}${m.is_me ? ' <span class="muted">(you)</span>' : ''}</td>
+      <td>${roles[m.role] ?? ''}</td>
+      <td class="num">${fmtHours(m.seconds / 3600)}</td>
+      <td class="num">${pct(totalSeconds > 0 ? m.seconds / totalSeconds : 0)}</td>
+      ${removable ? `<td class="num">${m.role === 'member' && !m.is_me ? `<button type="button" class="btn-secondary" data-remove="${escapeHtml(m.user_id)}">Remove</button>` : ''}</td>` : ''}
+    </tr>`);
+  return `
+    <div class="table-wrap">
+      <table class="ptable">
+        <thead><tr><th>Person</th><th>Role</th><th class="num">Tracked</th><th class="num">Share</th>${removable ? '<th></th>' : ''}</tr></thead>
+        <tbody>${rows.join('')}</tbody>
       </table>
     </div>`;
 }

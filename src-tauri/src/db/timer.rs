@@ -14,7 +14,7 @@
 
 use super::days::record_daily;
 use super::Db;
-use rusqlite::{params, Connection, Result as SqlResult};
+use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use serde::Serialize;
 
 /// A session that was still open when the app last died, and was closed on
@@ -48,6 +48,10 @@ pub struct Session {
     pub phase_id: Option<String>,
     pub feature_id: Option<String>,
     pub note: Option<String>,
+    /// False for a teammate's session, which can't be edited here.
+    pub mine: bool,
+    /// Who tracked it, for a project with more than one person.
+    pub user_name: Option<String>,
 }
 
 /// A note from a form: trimmed, and empty means no note.
@@ -60,6 +64,21 @@ fn clean_note(note: Option<&str>) -> Option<&str> {
 /// The Android app builds ids the same way; the format must never change.
 pub fn session_id(project_id: &str, started_at: i64) -> String {
     format!("{project_id}@{started_at}")
+}
+
+/// The id your session is booked under. On a shared project the id includes you,
+/// so two people who start in the same millisecond don't share a row.
+pub(super) fn entry_id(conn: &Connection, project_id: &str, started_at: i64) -> SqlResult<String> {
+    let shared_as: Option<String> = conn
+        .query_row(
+            "SELECT value FROM sync_meta WHERE key = 'user_id'
+             AND (SELECT COUNT(*) FROM project_members WHERE project_id = ?1) > 1",
+            params![project_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let id = session_id(project_id, started_at);
+    Ok(shared_as.map_or(id.clone(), |user| format!("{id}@{user}")))
 }
 
 /// Closes the open session of one project as of `end` (ms). Returns the
@@ -82,10 +101,11 @@ pub(super) fn pause_one(conn: &Connection, id: &str, end: i64) -> SqlResult<i64>
         params![id],
     )?;
     if let (Some(start), true) = (started_at, elapsed > 0) {
+        let entry = entry_id(conn, id, start)?;
         let booked = conn.execute(
             "INSERT OR IGNORE INTO time_entries (id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![session_id(id, start), id, start, start + elapsed * 1000, elapsed, phase_id, feature_id, note],
+            params![entry, id, start, start + elapsed * 1000, elapsed, phase_id, feature_id, note],
         )?;
         if booked == 1 {
             conn.execute(
@@ -97,7 +117,7 @@ pub(super) fn pause_one(conn: &Connection, id: &str, end: i64) -> SqlResult<i64>
             // Another device booked it first: keep the note written here.
             conn.execute(
                 "UPDATE time_entries SET note = ?1 WHERE id = ?2 AND note IS NULL",
-                params![note, session_id(id, start)],
+                params![note, entry],
             )?;
         }
     }
@@ -138,9 +158,9 @@ fn close_all(conn: &Connection, now: i64) -> SqlResult<Vec<ClosedSession>> {
     for (project_id, project_name, started_at) in open {
         let seconds = pause_one(conn, &project_id, now)?;
         if seconds > 0 {
-            let entry_id = session_id(&project_id, started_at);
-            let note = conn.query_row("SELECT note FROM time_entries WHERE id = ?1", params![entry_id], |r| r.get(0))?;
-            closed.push(ClosedSession { entry_id, project_id, project_name, seconds, note });
+            let entry = entry_id(conn, &project_id, started_at)?;
+            let note = conn.query_row("SELECT note FROM time_entries WHERE id = ?1", params![entry], |r| r.get(0))?;
+            closed.push(ClosedSession { entry_id: entry, project_id, project_name, seconds, note });
         }
     }
     pause_all(conn, now)?; // a running row with no start time books nothing
@@ -188,10 +208,10 @@ impl Db {
         Ok(())
     }
 
-    /// Sets or clears the note of a closed session.
+    /// Sets or clears the note of one of your closed sessions.
     pub fn set_entry_note(&self, entry_id: &str, note: Option<&str>) -> SqlResult<()> {
         self.conn().execute(
-            "UPDATE time_entries SET note = ?1 WHERE id = ?2",
+            "UPDATE time_entries SET note = ?1 WHERE id = ?2 AND user_id IS NULL",
             params![clean_note(note), entry_id],
         )?;
         Ok(())
@@ -201,8 +221,15 @@ impl Db {
     pub fn list_sessions(&self, project_id: &str) -> SqlResult<Vec<Session>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT id, start_ts, end_ts, seconds, phase_id, feature_id, note FROM time_entries
-             WHERE project_id = ?1 ORDER BY start_ts DESC",
+            "SELECT e.id, e.start_ts, e.end_ts, e.seconds, e.phase_id, e.feature_id, e.note, e.user_id IS NULL,
+                    CASE WHEN (SELECT COUNT(*) FROM project_members m WHERE m.project_id = e.project_id) > 1
+                           OR EXISTS (SELECT 1 FROM time_entries o WHERE o.project_id = e.project_id AND o.user_id IS NOT NULL)
+                    THEN COALESCE((SELECT m.display_name FROM project_members m WHERE m.project_id = e.project_id
+                                   AND m.user_id = COALESCE(e.user_id, (SELECT value FROM sync_meta WHERE key = 'user_id'))),
+                                  'Former member')
+                    END
+             FROM time_entries e
+             WHERE e.project_id = ?1 ORDER BY e.start_ts DESC",
         )?;
         let rows = stmt.query_map(params![project_id], |r| {
             Ok(Session {
@@ -213,6 +240,8 @@ impl Db {
                 phase_id: r.get(4)?,
                 feature_id: r.get(5)?,
                 note: r.get(6)?,
+                mine: r.get(7)?,
+                user_name: r.get(8)?,
             })
         })?;
         rows.collect()

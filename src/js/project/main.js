@@ -1,17 +1,17 @@
 // Entry point of a project window (project.html).
 //
-// Loads one project's detail (project + phases + features + sessions + per-day hours) from the
+// Loads one project's detail (project + phases + features + sessions + per-day hours + members) from the
 // backend, folds in the running timer, computes metrics once, and hands them
 // to whichever tab is visible. Reloads on every `data-changed` event, so
 // edits made here, in the widget, or in another window all show up.
 import { api, onDataChanged } from '../core/api.js';
 import { escapeHtml, fmtDate, fmtHMS, fmtTime, money } from '../core/format.js';
-import { bill, liveSeconds } from '../core/model.js';
+import { bill, billedPeople, liveSeconds } from '../core/model.js';
 import { appWindow, getAppVersion, saveDialog, writeTextFile } from '../core/tauri.js';
 import { setupTitlebar } from '../core/titlebar.js';
 import { editNote, toggleTimer } from '../core/session-notes.js';
 import { useSharedTheme } from '../core/theme.js';
-import { featureTableHtml, pill, sessionTableHtml } from './blocks.js';
+import { featureTableHtml, memberTableHtml, pill, sessionTableHtml } from './blocks.js';
 import { openFeatureDialog } from './feature-dialog.js';
 import { isDragging, renderGantt, scrollToToday, ZOOMS } from './gantt.js';
 import { computeMetrics, HEALTH, isMilestone, sessionRows, withLiveTime } from './metrics.js';
@@ -28,7 +28,8 @@ const WAKE_GAP_MS = 5000;
 
 const $ = (id) => document.getElementById(id);
 
-let detail = null; // { project, phases, features, sessions, daily } from the backend
+let detail = null; // { project, phases, features, sessions, daily, members } from the backend
+let cloud = null; // cloud sync status, for the Team tab
 let tab = 'overview';
 let zoom = ZOOMS[localStorage.getItem(ZOOM_KEY)] ? localStorage.getItem(ZOOM_KEY) : 'week';
 let appVersion = '';
@@ -37,7 +38,7 @@ let appVersion = '';
 
 async function load() {
   try {
-    detail = await api.projectDetail(PROJECT_ID);
+    [detail, cloud] = await Promise.all([api.projectDetail(PROJECT_ID), api.cloudStatus()]);
   } catch (err) {
     console.error(err);
     appWindow.close(); // the project was deleted
@@ -65,6 +66,7 @@ function render() {
   if (tab === 'schedule') renderSchedule(live, m);
   if (tab === 'features') renderFeatures(live, m);
   if (tab === 'history') renderHistory(live);
+  if (tab === 'team') renderTeam(live);
   if (tab === 'report') renderReportPreview(live, m);
 }
 
@@ -80,7 +82,8 @@ function renderHeader(live, m) {
     : `<div class="proj-logo logo-placeholder">${escapeHtml((p.name[0] || '?').toUpperCase())}</div>`;
 
   const meta = [pill(HEALTH[m.health].tone, HEALTH[m.health].label)];
-  if (p.hourly_rate > 0) meta.push(`<span class="earnings">${money(p.hourly_rate)}/h${p.people_count > 1 ? ` × ${p.people_count}` : ''}</span>`);
+  if (p.hourly_rate > 0) meta.push(`<span class="earnings">${money(p.hourly_rate)}/h${billedPeople(p) > 1 ? ` × ${billedPeople(p)}` : ''}</span>`);
+  if (p.shared) meta.push(`<span>${p.is_owner ? 'Shared by you' : 'Shared with you'}</span>`);
   meta.push(`<span>Created ${fmtDate(new Date(p.created_at))}</span>`);
   if (p.archived && p.archived_at) meta.push(`<span>Filed ${fmtDate(new Date(p.archived_at))}</span>`);
   $('projMeta').innerHTML = meta.join('<span class="sep">·</span>');
@@ -89,6 +92,7 @@ function renderHeader(live, m) {
   fillBookingSelect($('featureSelect'), [{ id: '', name: 'No feature (unassigned)' }, ...live.features], p.active_feature_id, p.archived);
   $('timerBtn').disabled = p.archived;
   $('archivedBanner').classList.toggle('hidden', !p.archived);
+  $('restoreBtn').classList.toggle('hidden', !p.is_owner);
   renderTimer();
 }
 
@@ -127,7 +131,7 @@ $('restoreBtn').addEventListener('click', () => api.restoreProject(PROJECT_ID));
 function setTab(name) {
   tab = name;
   document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
-  for (const t of ['overview', 'schedule', 'features', 'history', 'report']) {
+  for (const t of ['overview', 'schedule', 'features', 'history', 'team', 'report']) {
     $(`tab${t[0].toUpperCase()}${t.slice(1)}`).classList.toggle('hidden', t !== name);
   }
   render();
@@ -147,6 +151,7 @@ function renderSchedule(live, m) {
     plan.budget.value = p.budget_hours || '';
     plan.desc.value = p.description || '';
   }
+  for (const field of Object.values(plan)) field.disabled = !p.is_owner;
   plan.budget.placeholder = m.estimatedH > 0 ? `Sum of phases: ${Math.round(m.estimatedH)}` : 'Sum of phases';
   $('zoomSeg').querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.zoom === zoom)));
   const readOnly = p.archived;
@@ -241,6 +246,66 @@ $('historyHost').addEventListener('click', (e) => {
   if (session) editNote(session).catch((err) => alert(String(err)));
 });
 
+// ---------------------------------------------------------------- team tab
+
+function renderTeam(live) {
+  const p = live.project;
+  const signedIn = !!cloud?.signed_in;
+  $('addMemberForm').classList.toggle('hidden', !(signedIn && p.is_owner));
+  $('teamLeave').classList.toggle('hidden', !(signedIn && !p.is_owner));
+  $('teamHint').textContent = p.is_owner
+    ? 'Members can edit phases and features and track their own time. Only you change the plan, rate and members.'
+    : 'Only the owner can change the plan, rate and members.';
+  if (!signedIn) {
+    $('teamHost').innerHTML = '<div class="empty-note">Sign in to Cloud sync to share this project (Settings ☰ → Cloud sync).</div>';
+  } else if (live.members.length) {
+    $('teamHost').innerHTML = memberTableHtml(live.members, live.totalSeconds, { removable: p.is_owner });
+  } else {
+    $('teamHost').innerHTML = '<div class="empty-note">This project hasn\'t synced yet.</div>';
+  }
+}
+
+$('addMemberForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = $('memberCode').value.trim();
+  if (!code) return;
+  $('addMemberBtn').disabled = true;
+  $('teamStatus').textContent = 'Adding…';
+  try {
+    const name = await api.addMember(PROJECT_ID, code);
+    $('memberCode').value = '';
+    $('teamStatus').textContent = `Added ${name}. They'll see this project and its history the next time they sync.`;
+    await load();
+  } catch (err) {
+    $('teamStatus').textContent = String(err);
+  } finally {
+    $('addMemberBtn').disabled = false;
+  }
+});
+
+$('teamHost').addEventListener('click', async (e) => {
+  const userId = e.target.closest('button[data-remove]')?.dataset.remove;
+  const member = detail.members.find((m) => m.user_id === userId);
+  if (!member || !confirm(`Remove ${member.display_name} from "${detail.project.name}"?\nThe time they tracked stays on the project.`)) return;
+  try {
+    await api.removeMember(PROJECT_ID, userId);
+    $('teamStatus').textContent = `Removed ${member.display_name}.`;
+    await load();
+  } catch (err) {
+    $('teamStatus').textContent = String(err);
+  }
+});
+
+$('leaveBtn').addEventListener('click', async () => {
+  const me = detail.members.find((m) => m.is_me);
+  if (!me || !confirm(`Leave "${detail.project.name}"?\nIt's removed from your devices. The time you tracked stays with the project, and the owner can add you back.`)) return;
+  try {
+    await api.removeMember(PROJECT_ID, me.user_id);
+  } catch (err) {
+    $('teamStatus').textContent = String(err);
+  }
+});
+
 // ---------------------------------------------------------------- report tab
 
 const reportAuthor = $('reportAuthor');
@@ -254,6 +319,7 @@ function reportOptions() {
     includePhases: $('optPhases').checked,
     includeFeatures: $('optFeatures').checked,
     includeSessions: $('optSessions').checked,
+    includePeople: $('optPeople').checked,
     includeCharts: $('optCharts').checked,
     includeBilling: $('optBilling').checked,
     version: appVersion,
@@ -263,6 +329,7 @@ function reportOptions() {
 function renderReportPreview(live, m) {
   if (!billingTouched) $('optBilling').checked = live.project.hourly_rate > 0;
   $('optBilling').disabled = !(live.project.hourly_rate > 0);
+  $('optPeopleRow').classList.toggle('hidden', live.members.length < 2);
   $('reportPreview').innerHTML = `<style>${REPORT_CSS}</style>${reportHtml(live, m, reportOptions())}`;
 }
 

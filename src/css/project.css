@@ -342,3 +342,8 @@
   .report-preview { padding: 0; background: #fff; border-radius: 0; overflow: visible; }
   .report-preview .rpt { box-shadow: none; border-radius: 0; padding: 0; max-width: none; }
 }
+
+/* Team tab */
+.team-add { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 8px; }
+.team-add .field { flex: 1; margin: 0; }
+.team-leave { margin-top: 14px; }

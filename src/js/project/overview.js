@@ -1,7 +1,7 @@
 // Overview tab: health, headline numbers, progress, hours per phase and feature, charts.
 import { burnupSvg, donutSvg, weeklyBarsSvg } from '../core/charts.js';
 import { escapeHtml, fmtHours } from '../core/format.js';
-import { burnupLegendHtml, featureTableHtml, healthPill, kpiTilesHtml, notesHtml, phaseTableHtml, progressBarsHtml } from './blocks.js';
+import { burnupLegendHtml, featureTableHtml, healthPill, kpiTilesHtml, memberTableHtml, notesHtml, phaseTableHtml, progressBarsHtml } from './blocks.js';
 import { burnupSeries, HEALTH, summarySentence, weeklySeries } from './metrics.js';
 
 export function renderOverview(host, { live, m }) {
@@ -31,6 +31,11 @@ export function renderOverview(host, { live, m }) {
     ${m.featureRows.length ? `<section class="panel">
       <div class="panel-head"><h2>Hours by feature</h2><span class="panel-total">${fmtHours(m.spentH)}</span></div>
       ${featureTableHtml(m)}
+    </section>` : ''}
+
+    ${live.members.length > 1 ? `<section class="panel">
+      <div class="panel-head"><h2>Hours by person</h2><span class="panel-total">${fmtHours(m.spentH)}</span></div>
+      ${memberTableHtml(live.members, live.totalSeconds)}
     </section>` : ''}
 
     <div class="two-col">
