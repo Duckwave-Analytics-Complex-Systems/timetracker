@@ -1,5 +1,5 @@
 /* Project window only (project.html): header + timer, Overview, Schedule
-   (plan form + Gantt), Report tab, phase dialog, print rules.
+   (plan form + Gantt), Features, Report tab, phase and feature dialogs, print rules.
    The report's own look is in js/project/report-style.js. */
 
 /* ---------------- Header ---------------- */
@@ -34,6 +34,7 @@
 .timer-time { font-family: var(--font-mono); font-size: 21px; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .proj-timer.running .timer-time { color: var(--accent-running); }
 .timer-sub { font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; }
+.booking-picks { display: flex; flex-direction: column; gap: 4px; }
 .phase-pick { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
 .phase-pick select {
   max-width: 170px;
@@ -127,6 +128,9 @@
 .ptable .nowrap { white-space: nowrap; color: var(--text-muted); }
 .ptable .over { color: var(--status-bad); }
 .ptable .muted-row td { color: var(--text-muted); }
+.ptable .session-note { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 180px; }
+.ptable .row-link { cursor: pointer; }
+.ptable .row-link:hover td { background: var(--surface-selected); }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 7px; }
 .dot.ms { transform: rotate(45deg) scale(.9); border-radius: 1px; }
 .mini { display: inline-block; width: 46px; height: 5px; margin-right: 7px; border-radius: 3px; background: var(--border-hair); vertical-align: 1px; overflow: hidden; }
@@ -332,7 +336,7 @@
 @media print {
   html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
   #app { display: block; height: auto; border: none; border-radius: 0; background: #fff; overflow: visible; }
-  #titlebar, .proj-head, .tabs, #archivedBanner, .report-options, #tabOverview, #tabSchedule, dialog { display: none !important; }
+  #titlebar, .proj-head, .tabs, #archivedBanner, .report-options, #tabOverview, #tabSchedule, #tabFeatures, #tabHistory, dialog { display: none !important; }
   .proj-body { padding: 0; overflow: visible; }
   .report-layout { display: block; }
   .report-preview { padding: 0; background: #fff; border-radius: 0; overflow: visible; }

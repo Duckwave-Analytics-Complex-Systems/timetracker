@@ -10,6 +10,7 @@
 //              assuming each phase progresses linearly from its start to its end
 //   efficiency earned hours / spent hours, where earned = completion x budget
 //              (> 1: progress costs fewer hours than planned)
+// Features only split the hours: they never affect completion, plan or health.
 import { addDays, clamp, dayKey, daysBetween, fmtDate, fmtHours, parseDay, pct, startOfToday, startOfWeek } from '../core/format.js';
 import { liveAdditions, liveSeconds, openSessionSeconds } from '../core/model.js';
 
@@ -43,16 +44,24 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
  * Folds the open session (if the project is running) into the backend
- * detail: phase hours, per-day hours and the total.
+ * detail: phase and feature hours, per-day hours and the total.
  */
-export function withLiveTime({ project, phases, daily }, now = Date.now()) {
+/** Closed sessions, newest first, with their phase and feature names. */
+export function sessionRows({ sessions, phases, features }) {
+  const nameOf = (rows, id) => rows.find((r) => r.id === id)?.name ?? '';
+  return sessions.map((s) => ({ ...s, phaseName: nameOf(phases, s.phase_id), featureName: nameOf(features, s.feature_id) }));
+}
+
+export function withLiveTime({ project, phases, features, sessions, daily }, now = Date.now()) {
   const open = openSessionSeconds(project, now);
   const livePhases = phases.map((ph) =>
     open && ph.id === project.active_phase_id ? { ...ph, spent_seconds: ph.spent_seconds + open } : ph);
+  const liveFeatures = features.map((f) =>
+    open && f.id === project.active_feature_id ? { ...f, spent_seconds: f.spent_seconds + open } : f);
   const byDay = new Map(daily.map((d) => [d.day, d.seconds]));
   for (const [day, , s] of liveAdditions([project], now)) byDay.set(day, (byDay.get(day) || 0) + s);
   const liveDaily = [...byDay].sort(([a], [b]) => (a < b ? -1 : 1)).map(([day, seconds]) => ({ day, seconds }));
-  return { project, phases: livePhases, daily: liveDaily, totalSeconds: liveSeconds(project, now) };
+  return { project, phases: livePhases, features: liveFeatures, sessions, daily: liveDaily, totalSeconds: liveSeconds(project, now) };
 }
 
 /** Share of a phase the schedule expects done at the *start* of `day` (0..1). */
@@ -62,7 +71,7 @@ function plannedAt(ph, day) {
   return clamp(daysBetween(s, day) / (daysBetween(s, e) + 1), 0, 1);
 }
 
-export function computeMetrics({ project, phases, daily, totalSeconds }, today = startOfToday()) {
+export function computeMetrics({ project, phases, features, daily, totalSeconds }, today = startOfToday()) {
   const work = phases.filter((p) => !isMilestone(p));
   const spentH = totalSeconds / 3600;
   const estimatedH = sum(work, (p) => p.estimated_hours);
@@ -125,6 +134,13 @@ export function computeMetrics({ project, phases, daily, totalSeconds }, today =
     };
   });
 
+  // ---- features
+  const featureRows = features.map((f) => {
+    const fSpentH = f.spent_seconds / 3600;
+    return { ...f, spentH: fSpentH, share: spentH > 0 ? fSpentH / spentH : 0 };
+  });
+  const featureUnassignedH = Math.max(0, spentH - sum(features, (f) => f.spent_seconds) / 3600);
+
   // ---- health + the reasons behind it
   const notes = []; // { tone: 'ok' | 'warn' | 'bad', text }
   let health;
@@ -171,7 +187,7 @@ export function computeMetrics({ project, phases, daily, totalSeconds }, today =
     spentH, estimatedH, budgetH, remainingH, budgetUsed, unassignedH,
     start, due, today, totalDays, timelineElapsed, daysLeft,
     completion, planned, earnedH, efficiency, eacH, weeklyPace, workLeftH, forecastFinish,
-    phaseRows, health, notes,
+    phaseRows, featureRows, featureUnassignedH, health, notes,
   };
 }
 

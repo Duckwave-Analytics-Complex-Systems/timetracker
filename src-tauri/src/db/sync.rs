@@ -2,7 +2,7 @@
 //! The network side (Supabase over HTTP, the background thread) is in
 //! `src/sync.rs`; the server schema is in `supabase/schema.sql`.
 //!
-//! **Outbox.** SQLite triggers record the id of every project, phase and
+//! **Outbox.** SQLite triggers record the id of every project, feature, phase and
 //! time entry that is inserted, updated or deleted into `sync_outbox`, so
 //! none of the other db code needs to know about sync. A row that is missing
 //! locally when pushed goes up as a tombstone (`deleted = true`). `seq` lets
@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 /// The Android app creates identical tables and triggers.
 pub(super) const SYNC_TABLES: &str = "
     CREATE TABLE IF NOT EXISTS sync_outbox (
-        entity  TEXT NOT NULL,                   -- 'project' | 'phase' | 'entry'
+        entity  TEXT NOT NULL,                   -- 'project' | 'feature' | 'phase' | 'entry'
         id      TEXT NOT NULL,
         seq     INTEGER NOT NULL,
         PRIMARY KEY (entity, id)
@@ -47,9 +47,11 @@ pub(super) const SYNC_TABLES: &str = "
         INSERT OR REPLACE INTO sync_outbox VALUES ('project', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
     -- Only synced columns: timer state, totals and the liveness stamp are not rows to push.
-    CREATE TRIGGER IF NOT EXISTS sync_project_upd AFTER UPDATE OF
+    -- Dropped first so existing databases pick up new columns in this list.
+    DROP TRIGGER IF EXISTS sync_project_upd;
+    CREATE TRIGGER sync_project_upd AFTER UPDATE OF
         name, hourly_rate, archived, archived_at, logo_data, people_count,
-        description, start_day, due_day, budget_hours, active_phase_id ON projects
+        description, start_day, due_day, budget_hours, active_phase_id, active_feature_id ON projects
     WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
         INSERT OR REPLACE INTO sync_outbox VALUES ('project', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
@@ -71,6 +73,19 @@ pub(super) const SYNC_TABLES: &str = "
         INSERT OR REPLACE INTO sync_outbox VALUES ('phase', OLD.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
 
+    CREATE TRIGGER IF NOT EXISTS sync_feature_ins AFTER INSERT ON features
+    WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
+        INSERT OR REPLACE INTO sync_outbox VALUES ('feature', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
+    END;
+    CREATE TRIGGER IF NOT EXISTS sync_feature_upd AFTER UPDATE ON features
+    WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
+        INSERT OR REPLACE INTO sync_outbox VALUES ('feature', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
+    END;
+    CREATE TRIGGER IF NOT EXISTS sync_feature_del AFTER DELETE ON features
+    WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
+        INSERT OR REPLACE INTO sync_outbox VALUES ('feature', OLD.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
+    END;
+
     CREATE TRIGGER IF NOT EXISTS sync_entry_ins AFTER INSERT ON time_entries
     WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
         INSERT OR REPLACE INTO sync_outbox VALUES ('entry', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
@@ -89,17 +104,19 @@ pub(super) const SYNC_TABLES: &str = "
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Entity {
     Project,
+    Feature,
     Phase,
     Entry,
 }
 
 impl Entity {
     /// Push and pull order: parents first.
-    pub const ALL: [Entity; 3] = [Entity::Project, Entity::Phase, Entity::Entry];
+    pub const ALL: [Entity; 4] = [Entity::Project, Entity::Feature, Entity::Phase, Entity::Entry];
 
     pub fn key(self) -> &'static str {
         match self {
             Entity::Project => "project",
+            Entity::Feature => "feature",
             Entity::Phase => "phase",
             Entity::Entry => "entry",
         }
@@ -108,6 +125,7 @@ impl Entity {
     pub fn table(self) -> &'static str {
         match self {
             Entity::Project => "projects",
+            Entity::Feature => "features",
             Entity::Phase => "phases",
             Entity::Entry => "time_entries",
         }
@@ -204,7 +222,7 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
         Entity::Project => conn
             .query_row(
                 "SELECT id, name, hourly_rate, created_at, archived, archived_at, logo_data, people_count,
-                        description, start_day, due_day, budget_hours, active_phase_id
+                        description, start_day, due_day, budget_hours, active_phase_id, active_feature_id
                  FROM projects WHERE id = ?1",
                 params![id],
                 |r| {
@@ -222,6 +240,25 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
                         "due_day": r.get::<_, Option<String>>(10)?,
                         "budget_hours": r.get::<_, Option<f64>>(11)?,
                         "active_phase_id": r.get::<_, Option<String>>(12)?,
+                        "active_feature_id": r.get::<_, Option<String>>(13)?,
+                        "deleted": false,
+                    }))
+                },
+            )
+            .optional(),
+        Entity::Feature => conn
+            .query_row(
+                "SELECT id, project_id, name, color, sort_order, created_at
+                 FROM features WHERE id = ?1",
+                params![id],
+                |r| {
+                    Ok(json!({
+                        "id": r.get::<_, String>(0)?,
+                        "project_id": r.get::<_, String>(1)?,
+                        "name": r.get::<_, String>(2)?,
+                        "color": r.get::<_, i64>(3)?,
+                        "sort_order": r.get::<_, i64>(4)?,
+                        "created_at": r.get::<_, i64>(5)?,
                         "deleted": false,
                     }))
                 },
@@ -253,7 +290,7 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
             .optional(),
         Entity::Entry => conn
             .query_row(
-                "SELECT id, project_id, start_ts, end_ts, seconds, phase_id FROM time_entries WHERE id = ?1",
+                "SELECT id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note FROM time_entries WHERE id = ?1",
                 params![id],
                 |r| {
                     Ok(json!({
@@ -263,6 +300,8 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
                         "end_ts": r.get::<_, i64>(3)?,
                         "seconds": r.get::<_, i64>(4)?,
                         "phase_id": r.get::<_, Option<String>>(5)?,
+                        "feature_id": r.get::<_, Option<String>>(6)?,
+                        "note": r.get::<_, Option<String>>(7)?,
                         "deleted": false,
                     }))
                 },
@@ -292,19 +331,21 @@ fn apply_project(conn: &Connection, v: &Value) -> SqlResult<bool> {
         return Ok(false); // ours is newer and goes up next
     }
     if b(v, "deleted") {
-        // Entries, daily rows and phases go with it (ON DELETE CASCADE).
+        // Entries, daily rows, phases and features go with it (ON DELETE CASCADE).
         return Ok(conn.execute("DELETE FROM projects WHERE id = ?1", params![id])? > 0);
     }
     conn.execute(
         "INSERT INTO projects (id, name, hourly_rate, created_at, archived, archived_at, logo_data,
-                               people_count, description, start_day, due_day, budget_hours, active_phase_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                               people_count, description, start_day, due_day, budget_hours, active_phase_id,
+                               active_feature_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, hourly_rate = excluded.hourly_rate, created_at = excluded.created_at,
             archived = excluded.archived, archived_at = excluded.archived_at, logo_data = excluded.logo_data,
             people_count = excluded.people_count, description = excluded.description,
             start_day = excluded.start_day, due_day = excluded.due_day,
-            budget_hours = excluded.budget_hours, active_phase_id = excluded.active_phase_id",
+            budget_hours = excluded.budget_hours, active_phase_id = excluded.active_phase_id,
+            active_feature_id = excluded.active_feature_id",
         params![
             id,
             s(v, "name").unwrap_or_default(),
@@ -319,6 +360,40 @@ fn apply_project(conn: &Connection, v: &Value) -> SqlResult<bool> {
             s(v, "due_day"),
             f(v, "budget_hours"),
             s(v, "active_phase_id"),
+            s(v, "active_feature_id"),
+        ],
+    )?;
+    Ok(true)
+}
+
+fn apply_feature(conn: &Connection, v: &Value) -> SqlResult<bool> {
+    let Some(id) = s(v, "id") else { return Ok(false) };
+    if is_pending(conn, Entity::Feature, &id)? {
+        return Ok(false);
+    }
+    if b(v, "deleted") {
+        // Same as `Db::delete_feature`: its time becomes unassigned.
+        conn.execute("UPDATE projects SET active_feature_id = NULL WHERE active_feature_id = ?1", params![id])?;
+        conn.execute("UPDATE time_entries SET feature_id = NULL WHERE feature_id = ?1", params![id])?;
+        return Ok(conn.execute("DELETE FROM features WHERE id = ?1", params![id])? > 0);
+    }
+    let Some(project_id) = s(v, "project_id") else { return Ok(false) };
+    if !project_exists(conn, &project_id)? {
+        return Ok(false); // its project was deleted here
+    }
+    conn.execute(
+        "INSERT INTO features (id, project_id, name, color, sort_order, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET
+            project_id = excluded.project_id, name = excluded.name, color = excluded.color,
+            sort_order = excluded.sort_order, created_at = excluded.created_at",
+        params![
+            id,
+            project_id,
+            s(v, "name").unwrap_or_default(),
+            i(v, "color").unwrap_or(0),
+            i(v, "sort_order").unwrap_or(0),
+            i(v, "created_at").unwrap_or(0),
         ],
     )?;
     Ok(true)
@@ -370,16 +445,17 @@ fn apply_entry(conn: &Connection, v: &Value) -> SqlResult<bool> {
     if is_pending(conn, Entity::Entry, &id)? {
         return Ok(false);
     }
-    let old: Option<(String, i64, i64, Option<String>)> = conn
+    #[allow(clippy::type_complexity)]
+    let old: Option<(String, i64, i64, Option<String>, Option<String>, Option<String>)> = conn
         .query_row(
-            "SELECT project_id, start_ts, seconds, phase_id FROM time_entries WHERE id = ?1",
+            "SELECT project_id, start_ts, seconds, phase_id, feature_id, note FROM time_entries WHERE id = ?1",
             params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
         )
         .optional()?;
 
     if b(v, "deleted") {
-        let Some((project_id, start_ts, seconds, _)) = old else { return Ok(false) };
+        let Some((project_id, start_ts, seconds, _, _, _)) = old else { return Ok(false) };
         adjust_totals(conn, &project_id, start_ts, seconds, -1)?;
         conn.execute("DELETE FROM time_entries WHERE id = ?1", params![id])?;
         return Ok(true);
@@ -394,24 +470,27 @@ fn apply_entry(conn: &Connection, v: &Value) -> SqlResult<bool> {
         return Ok(false);
     }
     let phase_id = s(v, "phase_id");
+    let feature_id = s(v, "feature_id");
+    let note = s(v, "note");
     match old {
-        Some(o) if o == (project_id.clone(), start_ts, seconds, phase_id.clone()) => return Ok(false),
-        Some((old_project, old_start, old_seconds, _)) => {
+        Some(o) if o == (project_id.clone(), start_ts, seconds, phase_id.clone(), feature_id.clone(), note.clone()) => return Ok(false),
+        Some((old_project, old_start, old_seconds, _, _, _)) => {
             if (old_project.as_str(), old_start, old_seconds) != (project_id.as_str(), start_ts, seconds) {
                 adjust_totals(conn, &old_project, old_start, old_seconds, -1)?;
                 adjust_totals(conn, &project_id, start_ts, seconds, 1)?;
             }
             conn.execute(
-                "UPDATE time_entries SET project_id = ?1, start_ts = ?2, end_ts = ?3, seconds = ?4, phase_id = ?5
-                 WHERE id = ?6",
-                params![project_id, start_ts, end_ts, seconds, phase_id, id],
+                "UPDATE time_entries SET project_id = ?1, start_ts = ?2, end_ts = ?3, seconds = ?4, phase_id = ?5,
+                                         feature_id = ?6, note = ?7
+                 WHERE id = ?8",
+                params![project_id, start_ts, end_ts, seconds, phase_id, feature_id, note, id],
             )?;
         }
         None => {
             conn.execute(
-                "INSERT INTO time_entries (id, project_id, start_ts, end_ts, seconds, phase_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![id, project_id, start_ts, end_ts, seconds, phase_id],
+                "INSERT INTO time_entries (id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note],
             )?;
             adjust_totals(conn, &project_id, start_ts, seconds, 1)?;
         }
@@ -454,7 +533,7 @@ impl Db {
         Ok(())
     }
 
-    /// Forgets every project, phase and tracked session on this device, and
+    /// Forgets every project, feature, phase and tracked session on this device, and
     /// anything queued for upload. Used when a different account signs in:
     /// the old account keeps its copy on the server, and nothing here is
     /// sent as a delete.
@@ -462,7 +541,7 @@ impl Db {
         let mut conn = self.conn();
         muted(&mut conn, |c| {
             c.execute_batch(
-                "DELETE FROM time_entries; DELETE FROM daily_totals; DELETE FROM phases;
+                "DELETE FROM time_entries; DELETE FROM daily_totals; DELETE FROM phases; DELETE FROM features;
                  DELETE FROM projects; DELETE FROM sync_outbox;",
             )
         })
@@ -478,6 +557,7 @@ impl Db {
     pub fn enqueue_all(&self) -> SqlResult<()> {
         self.conn().execute_batch(
             "INSERT OR IGNORE INTO sync_outbox (entity, id, seq) SELECT 'project', id, 0 FROM projects;
+             INSERT OR IGNORE INTO sync_outbox (entity, id, seq) SELECT 'feature', id, 0 FROM features;
              INSERT OR IGNORE INTO sync_outbox (entity, id, seq) SELECT 'phase', id, 0 FROM phases;
              INSERT OR IGNORE INTO sync_outbox (entity, id, seq) SELECT 'entry', id, 0 FROM time_entries;",
         )
@@ -522,6 +602,7 @@ impl Db {
             for v in rows {
                 changed |= match entity {
                     Entity::Project => apply_project(c, v)?,
+                    Entity::Feature => apply_feature(c, v)?,
                     Entity::Phase => apply_phase(c, v)?,
                     Entity::Entry => apply_entry(c, v)?,
                 };

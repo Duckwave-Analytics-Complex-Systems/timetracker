@@ -3,6 +3,7 @@
 import { api } from '../core/api.js';
 import { escapeHtml, fmtHMS, money } from '../core/format.js';
 import { bill, liveSeconds } from '../core/model.js';
+import { toggleTimer } from '../core/session-notes.js';
 import { state, act } from './store.js';
 
 const SORT_STORAGE_KEY = 'timetrack:sort';
@@ -48,6 +49,9 @@ function cardHtml(p, seconds) {
   const phase = p.active_phase_name
     ? `<div class="card-phase"><i style="background:var(--cat-${(p.active_phase_color ?? 0) + 1})"></i>${escapeHtml(p.active_phase_name)}</div>`
     : '';
+  const feature = p.active_feature_name
+    ? `<div class="card-phase"><i style="background:var(--cat-${(p.active_feature_color ?? 0) + 1})"></i>${escapeHtml(p.active_feature_name)}</div>`
+    : '';
   return `
     <div class="ring-wrap" role="button" tabindex="0" aria-label="${p.is_running ? 'Pause' : 'Start'} ${escapeHtml(p.name)}">
       <svg viewBox="0 0 64 64">
@@ -62,6 +66,7 @@ function cardHtml(p, seconds) {
       <div class="card-meta-text">
         <div class="card-name">${escapeHtml(p.name)}</div>
         ${phase}
+        ${feature}
         <div class="card-sub">
           <span class="status-dot"></span>
           <span>${p.is_running ? (p.run_device ? 'Running on phone' : 'Running') : 'Paused'}</span>
@@ -88,8 +93,8 @@ export function renderProjects() {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); }
     };
     const ring = card.querySelector('.ring-wrap');
-    ring.addEventListener('click', () => toggleTimer(p));
-    ring.addEventListener('keydown', onKey(() => toggleTimer(p)));
+    ring.addEventListener('click', () => toggleTimer(p, act));
+    ring.addEventListener('keydown', onKey(() => toggleTimer(p, act)));
     const meta = card.querySelector('.card-meta');
     meta.addEventListener('click', () => api.openProjectWindow(p.id));
     meta.addEventListener('keydown', onKey(() => api.openProjectWindow(p.id)));
@@ -97,10 +102,6 @@ export function renderProjects() {
 
     listEl.appendChild(card);
   }
-}
-
-function toggleTimer(p) {
-  return act(() => (p.is_running ? api.pause() : api.start(p.id)));
 }
 
 sortSelect.value = sortBy;

@@ -9,6 +9,7 @@
 //! | `projects.rs` | project CRUD, plan fields (dates, budget), archive/restore  |
 //! | `timer.rs`    | start / pause / crash recovery / liveness stamp             |
 //! | `phases.rs`   | the schedule (phases + milestones) and hours per phase      |
+//! | `features.rs` | project features and hours per feature                     |
 //! | `stats.rs`    | read-only per-day queries for Stats and the project window  |
 //! | `sync.rs`     | cloud sync: outbox triggers, applying pulled rows, timer    |
 //!
@@ -17,6 +18,7 @@
 //! because the mutex is not reentrant.
 
 mod days;
+mod features;
 mod phases;
 mod projects;
 mod schema;
@@ -31,11 +33,12 @@ use rusqlite::{Connection, Result as SqlResult};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
+pub use features::{Feature, FeatureInput};
 pub use phases::{Phase, PhaseInput};
 pub use projects::{PlanInput, Project};
 pub use stats::{DailyRow, DayTotal};
 pub use sync::{Entity, Pending, RemoteTimer, TimerPush};
-pub use timer::RecoveredRun;
+pub use timer::{ClosedSession, RecoveredRun, Session};
 
 pub struct Db(Mutex<Connection>);
 

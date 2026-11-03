@@ -18,11 +18,15 @@ export const api = {
   resetProject: (id) => invoke('reset_project', { id }),
 
   // ---- timer
+  /** Both return the sessions that closed: [{ entry_id, project_id, project_name, seconds, note }] */
   start: (id) => invoke('start_project', { id }),
   pause: () => invoke('pause_timer'),
+  setRunNote: (projectId, note) => invoke('set_run_note', { projectId, note }),
+  setEntryNote: (entryId, note) => invoke('set_entry_note', { entryId, note }),
   sync: () => invoke('sync'),
   takeRecoveredRuns: () => invoke('take_recovered_runs'),
   setActivePhase: (projectId, phaseId) => invoke('set_active_phase', { projectId, phaseId }),
+  setActiveFeature: (projectId, featureId) => invoke('set_active_feature', { projectId, featureId }),
 
   // ---- schedule / project window
   projectDetail: (id) => invoke('get_project_detail', { id }),
@@ -31,6 +35,9 @@ export const api = {
   /** phase: { id?, project_id, name, kind, color, start_day, end_day, estimated_hours, progress } */
   savePhase: (phase) => invoke('save_phase', { phase }),
   deletePhase: (id) => invoke('delete_phase', { id }),
+  /** feature: { id?, project_id, name, color } */
+  saveFeature: (feature) => invoke('save_feature', { feature }),
+  deleteFeature: (id) => invoke('delete_feature', { id }),
   openProjectWindow: (id) => invoke('open_project_window', { id }),
 
   // ---- stats & export

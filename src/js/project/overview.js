@@ -1,7 +1,7 @@
-// Overview tab: health, headline numbers, progress, hours per phase, charts.
+// Overview tab: health, headline numbers, progress, hours per phase and feature, charts.
 import { burnupSvg, donutSvg, weeklyBarsSvg } from '../core/charts.js';
 import { escapeHtml, fmtHours } from '../core/format.js';
-import { burnupLegendHtml, healthPill, kpiTilesHtml, notesHtml, phaseTableHtml, progressBarsHtml } from './blocks.js';
+import { burnupLegendHtml, featureTableHtml, healthPill, kpiTilesHtml, notesHtml, phaseTableHtml, progressBarsHtml } from './blocks.js';
 import { burnupSeries, HEALTH, summarySentence, weeklySeries } from './metrics.js';
 
 export function renderOverview(host, { live, m }) {
@@ -27,6 +27,11 @@ export function renderOverview(host, { live, m }) {
       <div class="panel-head"><h2>Hours by phase</h2><span class="panel-total">${fmtHours(m.spentH)}</span></div>
       ${phaseTableHtml(m)}
     </section>
+
+    ${m.featureRows.length ? `<section class="panel">
+      <div class="panel-head"><h2>Hours by feature</h2><span class="panel-total">${fmtHours(m.spentH)}</span></div>
+      ${featureTableHtml(m)}
+    </section>` : ''}
 
     <div class="two-col">
       <section class="panel">

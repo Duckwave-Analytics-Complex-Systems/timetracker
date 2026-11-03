@@ -43,10 +43,16 @@
           <div class="timer-time" id="timerTime">00:00:00</div>
           <div class="timer-sub" id="timerSub"></div>
         </div>
-        <label class="phase-pick" title="New tracked time is booked to this phase">
-          <span>Booking to</span>
-          <select id="phaseSelect"></select>
-        </label>
+        <div class="booking-picks">
+          <label class="phase-pick" title="New tracked time is booked to this phase">
+            <span>Phase</span>
+            <select id="phaseSelect"></select>
+          </label>
+          <label class="phase-pick" title="New tracked time is booked to this feature">
+            <span>Feature</span>
+            <select id="featureSelect"></select>
+          </label>
+        </div>
         <button id="timerBtn" class="timer-btn">Start</button>
       </div>
     </section>
@@ -59,6 +65,8 @@
     <nav class="tabs" role="tablist" aria-label="Project views">
       <button class="tab" role="tab" data-tab="overview" aria-selected="true">Overview</button>
       <button class="tab" role="tab" data-tab="schedule" aria-selected="false">Schedule</button>
+      <button class="tab" role="tab" data-tab="features" aria-selected="false">Features</button>
+      <button class="tab" role="tab" data-tab="history" aria-selected="false">History</button>
       <button class="tab" role="tab" data-tab="report" aria-selected="false">Report</button>
     </nav>
 
@@ -99,6 +107,26 @@
         </section>
       </section>
 
+      <!-- ============ Features: hours per piece of work ============ -->
+      <section id="tabFeatures" class="pane hidden" role="tabpanel">
+        <section class="panel">
+          <div class="gantt-toolbar">
+            <h2>Features</h2>
+            <span class="spacer"></span>
+            <button class="btn-primary" id="addFeatureBtn">+ Feature</button>
+          </div>
+          <div id="featuresHost"></div>
+        </section>
+      </section>
+
+      <!-- ============ History: every closed session and its note ============ -->
+      <section id="tabHistory" class="pane hidden" role="tabpanel">
+        <section class="panel">
+          <div class="panel-head"><h2>History</h2><span class="panel-hint">Click a session to add or edit its note</span></div>
+          <div id="historyHost"></div>
+        </section>
+      </section>
+
       <!-- ============ Report (js/project/report.js) ============ -->
       <section id="tabReport" class="pane hidden" role="tabpanel">
         <div class="report-layout">
@@ -107,6 +135,8 @@
             <label class="field"><span>Prepared by</span><input id="reportAuthor" maxlength="80" placeholder="Your name or company" /></label>
             <label class="field"><span>Notes for this report</span><textarea id="reportNotes" rows="5" placeholder="Highlights, blockers, next steps…"></textarea></label>
             <label class="check"><input type="checkbox" id="optPhases" checked /> Hours by phase</label>
+            <label class="check"><input type="checkbox" id="optFeatures" checked /> Hours by feature</label>
+            <label class="check"><input type="checkbox" id="optSessions" /> Session notes</label>
             <label class="check"><input type="checkbox" id="optCharts" checked /> Charts</label>
             <label class="check"><input type="checkbox" id="optBilling" /> Billing figures</label>
             <div class="report-actions">
@@ -146,6 +176,23 @@
         <button type="button" class="btn-danger" id="phaseDelete">Delete</button>
         <span class="spacer"></span>
         <button type="button" class="btn-secondary" id="phaseCancel">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Add / edit a feature (js/project/feature-dialog.js) -->
+  <dialog id="featureDialog" class="dialog phase-dialog">
+    <form id="featureForm">
+      <h2 id="featureDialogTitle">New feature</h2>
+      <label class="field"><span>Name</span><input id="featureName" maxlength="80" required placeholder="e.g. Sharing, Session notes" /></label>
+      <div class="field"><span>Color</span><div class="swatches" id="featureColors"></div></div>
+      <div class="field"><span>Tracked so far</span><div class="readout" id="featureSpent">0 h</div></div>
+      <p class="field-error hidden" id="featureError"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn-danger" id="featureDelete">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn-secondary" id="featureCancel">Cancel</button>
         <button type="submit" class="btn-primary">Save</button>
       </div>
     </form>

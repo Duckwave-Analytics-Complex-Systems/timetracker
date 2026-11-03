@@ -32,6 +32,9 @@ pub struct Project {
     pub active_phase_id: Option<String>,
     pub active_phase_name: Option<String>,
     pub active_phase_color: Option<i64>,
+    pub active_feature_id: Option<String>,
+    pub active_feature_name: Option<String>,
+    pub active_feature_color: Option<i64>,
     /// Set while running a session started on another device (cloud sync).
     pub run_device: Option<String>,
 }
@@ -62,8 +65,11 @@ const SELECT_PROJECT: &str = "
     SELECT p.id, p.name, p.hourly_rate, p.total_seconds, p.is_running, p.run_started_at,
            p.created_at, p.archived, p.archived_at, p.logo_data, p.people_count,
            p.description, p.start_day, p.due_day, p.budget_hours,
-           p.active_phase_id, ph.name, ph.color, p.run_device
-    FROM projects p LEFT JOIN phases ph ON ph.id = p.active_phase_id";
+           p.active_phase_id, ph.name, ph.color, p.run_device,
+           p.active_feature_id, f.name, f.color
+    FROM projects p
+    LEFT JOIN phases ph ON ph.id = p.active_phase_id
+    LEFT JOIN features f ON f.id = p.active_feature_id";
 
 fn from_row(r: &Row) -> SqlResult<Project> {
     Ok(Project {
@@ -86,6 +92,9 @@ fn from_row(r: &Row) -> SqlResult<Project> {
         active_phase_name: r.get(16)?,
         active_phase_color: r.get(17)?,
         run_device: r.get(18)?,
+        active_feature_id: r.get(19)?,
+        active_feature_name: r.get(20)?,
+        active_feature_color: r.get(21)?,
     })
 }
 
@@ -170,17 +179,17 @@ impl Db {
     }
 
     pub fn delete_project(&self, id: &str) -> SqlResult<()> {
-        // Entries, daily rows and phases go with it (ON DELETE CASCADE).
+        // Entries, daily rows, phases and features go with it (ON DELETE CASCADE).
         self.conn().execute("DELETE FROM projects WHERE id = ?1", params![id])?;
         Ok(())
     }
 
-    /// Forgets all tracked time. The schedule (phases, dates) is kept.
+    /// Forgets all tracked time. The schedule (phases, dates) and features are kept.
     pub fn reset_project(&self, id: &str) -> SqlResult<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute(
-            "UPDATE projects SET total_seconds = 0, is_running = 0, run_started_at = NULL, last_alive_at = NULL WHERE id = ?1",
+            "UPDATE projects SET total_seconds = 0, is_running = 0, run_started_at = NULL, last_alive_at = NULL, run_note = NULL WHERE id = ?1",
             params![id],
         )?;
         tx.execute("DELETE FROM time_entries WHERE project_id = ?1", params![id])?;

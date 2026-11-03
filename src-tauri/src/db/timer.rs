@@ -28,6 +28,33 @@ pub struct RecoveredRun {
     pub seconds: i64,
 }
 
+/// A session closed by the user, so the frontend can ask what was done in it.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct ClosedSession {
+    pub entry_id: String,
+    pub project_id: String,
+    pub project_name: String,
+    pub seconds: i64,
+    pub note: Option<String>,
+}
+
+/// One closed session, as the History tab and the report show it.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct Session {
+    pub id: String,
+    pub start_ts: i64,
+    pub end_ts: i64,
+    pub seconds: i64,
+    pub phase_id: Option<String>,
+    pub feature_id: Option<String>,
+    pub note: Option<String>,
+}
+
+/// A note from a form: trimmed, and empty means no note.
+fn clean_note(note: Option<&str>) -> Option<&str> {
+    note.map(str::trim).filter(|n| !n.is_empty())
+}
+
 /// The id of the time entry a session is booked as. Deterministic, so when two
 /// synced devices both close the same session they write the same row.
 /// The Android app builds ids the same way; the format must never change.
@@ -39,25 +66,26 @@ pub fn session_id(project_id: &str, started_at: i64) -> String {
 /// seconds booked. Does nothing if the project isn't running, and books
 /// nothing if this session is already booked (it arrived from another device).
 pub(super) fn pause_one(conn: &Connection, id: &str, end: i64) -> SqlResult<i64> {
-    let (running, started_at, phase_id): (bool, Option<i64>, Option<String>) = conn.query_row(
-        "SELECT is_running, run_started_at, active_phase_id FROM projects WHERE id = ?1",
+    #[allow(clippy::type_complexity)]
+    let (running, started_at, phase_id, feature_id, note): (bool, Option<i64>, Option<String>, Option<String>, Option<String>) = conn.query_row(
+        "SELECT is_running, run_started_at, active_phase_id, active_feature_id, run_note FROM projects WHERE id = ?1",
         params![id],
-        |r| Ok((r.get::<_, i64>(0)? != 0, r.get(1)?, r.get(2)?)),
+        |r| Ok((r.get::<_, i64>(0)? != 0, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
     )?;
     if !running {
         return Ok(0);
     }
     let elapsed = started_at.map(|s| ((end - s) / 1000).max(0)).unwrap_or(0);
     conn.execute(
-        "UPDATE projects SET is_running = 0, run_started_at = NULL, last_alive_at = NULL, run_device = NULL
+        "UPDATE projects SET is_running = 0, run_started_at = NULL, last_alive_at = NULL, run_device = NULL, run_note = NULL
          WHERE id = ?1",
         params![id],
     )?;
     if let (Some(start), true) = (started_at, elapsed > 0) {
         let booked = conn.execute(
-            "INSERT OR IGNORE INTO time_entries (id, project_id, start_ts, end_ts, seconds, phase_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![session_id(id, start), id, start, start + elapsed * 1000, elapsed, phase_id],
+            "INSERT OR IGNORE INTO time_entries (id, project_id, start_ts, end_ts, seconds, phase_id, feature_id, note)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![session_id(id, start), id, start, start + elapsed * 1000, elapsed, phase_id, feature_id, note],
         )?;
         if booked == 1 {
             conn.execute(
@@ -65,6 +93,12 @@ pub(super) fn pause_one(conn: &Connection, id: &str, end: i64) -> SqlResult<i64>
                 params![elapsed, id],
             )?;
             record_daily(conn, id, start / 1000, elapsed)?;
+        } else if note.is_some() {
+            // Another device booked it first: keep the note written here.
+            conn.execute(
+                "UPDATE time_entries SET note = ?1 WHERE id = ?2 AND note IS NULL",
+                params![note, session_id(id, start)],
+            )?;
         }
     }
     Ok(elapsed)
@@ -94,9 +128,28 @@ fn pause_where(conn: &Connection, now: i64, filter: &str) -> SqlResult<Vec<Strin
     Ok(running)
 }
 
+/// Closes every open session as of `now`, reporting the ones that booked time.
+fn close_all(conn: &Connection, now: i64) -> SqlResult<Vec<ClosedSession>> {
+    let open: Vec<(String, String, i64)> = conn
+        .prepare("SELECT id, name, run_started_at FROM projects WHERE is_running = 1 AND run_started_at IS NOT NULL")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<SqlResult<_>>()?;
+    let mut closed = Vec::new();
+    for (project_id, project_name, started_at) in open {
+        let seconds = pause_one(conn, &project_id, now)?;
+        if seconds > 0 {
+            let entry_id = session_id(&project_id, started_at);
+            let note = conn.query_row("SELECT note FROM time_entries WHERE id = ?1", params![entry_id], |r| r.get(0))?;
+            closed.push(ClosedSession { entry_id, project_id, project_name, seconds, note });
+        }
+    }
+    pause_all(conn, now)?; // a running row with no start time books nothing
+    Ok(closed)
+}
+
 fn start(conn: &Connection, id: &str, now: i64) -> SqlResult<()> {
     conn.execute(
-        "UPDATE projects SET is_running = 1, run_started_at = ?1, last_alive_at = ?1, run_device = NULL
+        "UPDATE projects SET is_running = 1, run_started_at = ?1, last_alive_at = ?1, run_device = NULL, run_note = NULL
          WHERE id = ?2 AND archived = 0",
         params![now, id],
     )?;
@@ -106,21 +159,63 @@ fn start(conn: &Connection, id: &str, now: i64) -> SqlResult<()> {
 impl Db {
     /// Starts `id`. Whatever else was running is paused first in the same
     /// transaction: this is the one place "only one timer at a time" is enforced.
-    pub fn start_project(&self, id: &str, now: i64) -> SqlResult<()> {
+    /// Returns the sessions that closed.
+    pub fn start_project(&self, id: &str, now: i64) -> SqlResult<Vec<ClosedSession>> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        pause_all(&tx, now)?;
+        let closed = close_all(&tx, now)?;
         start(&tx, id, now)?;
-        tx.commit()
+        tx.commit()?;
+        Ok(closed)
     }
 
-    /// The Pause button: stops the timer wherever it was started.
-    pub fn pause_all_running(&self, now: i64) -> SqlResult<Vec<String>> {
+    /// The Pause button: stops the timer wherever it was started and reports what closed.
+    pub fn stop_timer(&self, now: i64) -> SqlResult<Vec<ClosedSession>> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let ids = pause_all(&tx, now)?;
+        let closed = close_all(&tx, now)?;
         tx.commit()?;
-        Ok(ids)
+        Ok(closed)
+    }
+
+    /// Sets the note of the open session. It is booked when the session closes,
+    /// however it closes. Does nothing if the project has stopped meanwhile.
+    pub fn set_run_note(&self, project_id: &str, note: Option<&str>) -> SqlResult<()> {
+        self.conn().execute(
+            "UPDATE projects SET run_note = ?1 WHERE id = ?2 AND is_running = 1",
+            params![clean_note(note), project_id],
+        )?;
+        Ok(())
+    }
+
+    /// Sets or clears the note of a closed session.
+    pub fn set_entry_note(&self, entry_id: &str, note: Option<&str>) -> SqlResult<()> {
+        self.conn().execute(
+            "UPDATE time_entries SET note = ?1 WHERE id = ?2",
+            params![clean_note(note), entry_id],
+        )?;
+        Ok(())
+    }
+
+    /// A project's closed sessions, newest first.
+    pub fn list_sessions(&self, project_id: &str) -> SqlResult<Vec<Session>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, start_ts, end_ts, seconds, phase_id, feature_id, note FROM time_entries
+             WHERE project_id = ?1 ORDER BY start_ts DESC",
+        )?;
+        let rows = stmt.query_map(params![project_id], |r| {
+            Ok(Session {
+                id: r.get(0)?,
+                start_ts: r.get(1)?,
+                end_ts: r.get(2)?,
+                seconds: r.get(3)?,
+                phase_id: r.get(4)?,
+                feature_id: r.get(5)?,
+                note: r.get(6)?,
+            })
+        })?;
+        rows.collect()
     }
 
     /// Exit and sleep: stops only a timer started on this device.
@@ -177,22 +272,34 @@ impl Db {
     /// its session is closed under the old phase and reopened under the new
     /// one, so every entry belongs to exactly one phase.
     pub fn set_active_phase(&self, project_id: &str, phase_id: Option<&str>, now: i64) -> SqlResult<()> {
+        self.rebook(project_id, "active_phase_id", phase_id, now)
+    }
+
+    /// The same as `set_active_phase`, for features.
+    pub fn set_active_feature(&self, project_id: &str, feature_id: Option<&str>, now: i64) -> SqlResult<()> {
+        self.rebook(project_id, "active_feature_id", feature_id, now)
+    }
+
+    /// Sets a project's `active_*` column, splitting any open session there.
+    fn rebook(&self, project_id: &str, column: &str, value: Option<&str>, now: i64) -> SqlResult<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let was_running: bool = tx.query_row(
-            "SELECT is_running FROM projects WHERE id = ?1",
+        let (was_running, note): (bool, Option<String>) = tx.query_row(
+            "SELECT is_running, run_note FROM projects WHERE id = ?1",
             params![project_id],
-            |r| Ok(r.get::<_, i64>(0)? != 0),
+            |r| Ok((r.get::<_, i64>(0)? != 0, r.get(1)?)),
         )?;
         if was_running {
-            pause_one(&tx, project_id, now)?; // booked to the old phase
+            pause_one(&tx, project_id, now)?; // booked to the old value
         }
         tx.execute(
-            "UPDATE projects SET active_phase_id = ?1 WHERE id = ?2",
-            params![phase_id, project_id],
+            &format!("UPDATE projects SET {column} = ?1 WHERE id = ?2"),
+            params![value, project_id],
         )?;
         if was_running {
             start(&tx, project_id, now)?;
+            // The note describes the whole session, so both parts carry it.
+            tx.execute("UPDATE projects SET run_note = ?1 WHERE id = ?2", params![note, project_id])?;
         }
         tx.commit()
     }

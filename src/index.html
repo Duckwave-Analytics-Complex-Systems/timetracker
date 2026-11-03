@@ -42,6 +42,14 @@
           <span class="switch-track"><span class="switch-thumb"></span></span>
         </label>
       </div>
+      <div class="settings-row">
+        <label for="notePromptSelect">Session notes</label>
+        <select id="notePromptSelect">
+          <option value="off">Off</option>
+          <option value="stop">On stop</option>
+          <option value="both">On start and stop</option>
+        </select>
+      </div>
       <button id="cloudBtn" class="settings-action">
         <svg viewBox="0 0 24 24" width="13" height="13"><path d="M7 18h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.1 9.5 4.25 4.25 0 0 0 7 18z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linejoin="round"/></svg>
         <span class="cloud-label">Cloud sync<span id="cloudState" class="cloud-state">Off</span></span>

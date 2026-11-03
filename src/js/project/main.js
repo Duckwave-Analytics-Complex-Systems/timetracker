@@ -1,6 +1,6 @@
 // Entry point of a project window (project.html).
 //
-// Loads one project's detail (project + phases + per-day hours) from the
+// Loads one project's detail (project + phases + features + sessions + per-day hours) from the
 // backend, folds in the running timer, computes metrics once, and hands them
 // to whichever tab is visible. Reloads on every `data-changed` event, so
 // edits made here, in the widget, or in another window all show up.
@@ -9,10 +9,12 @@ import { escapeHtml, fmtDate, fmtHMS, fmtTime, money } from '../core/format.js';
 import { bill, liveSeconds } from '../core/model.js';
 import { appWindow, getAppVersion, saveDialog, writeTextFile } from '../core/tauri.js';
 import { setupTitlebar } from '../core/titlebar.js';
+import { editNote, toggleTimer } from '../core/session-notes.js';
 import { useSharedTheme } from '../core/theme.js';
-import { pill } from './blocks.js';
+import { featureTableHtml, pill, sessionTableHtml } from './blocks.js';
+import { openFeatureDialog } from './feature-dialog.js';
 import { isDragging, renderGantt, scrollToToday, ZOOMS } from './gantt.js';
-import { computeMetrics, HEALTH, isMilestone, withLiveTime } from './metrics.js';
+import { computeMetrics, HEALTH, isMilestone, sessionRows, withLiveTime } from './metrics.js';
 import { renderOverview } from './overview.js';
 import { openPhaseDialog } from './phase-dialog.js';
 import { reportDocument, reportFileName, reportHtml } from './report.js';
@@ -26,7 +28,7 @@ const WAKE_GAP_MS = 5000;
 
 const $ = (id) => document.getElementById(id);
 
-let detail = null; // { project, phases, daily } from the backend
+let detail = null; // { project, phases, features, sessions, daily } from the backend
 let tab = 'overview';
 let zoom = ZOOMS[localStorage.getItem(ZOOM_KEY)] ? localStorage.getItem(ZOOM_KEY) : 'week';
 let appVersion = '';
@@ -61,6 +63,8 @@ function render() {
   renderHeader(live, m);
   if (tab === 'overview') renderOverview($('tabOverview'), { live, m });
   if (tab === 'schedule') renderSchedule(live, m);
+  if (tab === 'features') renderFeatures(live, m);
+  if (tab === 'history') renderHistory(live);
   if (tab === 'report') renderReportPreview(live, m);
 }
 
@@ -81,16 +85,19 @@ function renderHeader(live, m) {
   if (p.archived && p.archived_at) meta.push(`<span>Filed ${fmtDate(new Date(p.archived_at))}</span>`);
   $('projMeta').innerHTML = meta.join('<span class="sep">·</span>');
 
-  const select = $('phaseSelect');
-  if (document.activeElement !== select) {
-    const options = [{ id: '', name: 'No phase (unassigned)' }, ...live.phases.filter((ph) => !isMilestone(ph))];
-    select.innerHTML = options.map((o) => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
-    select.value = p.active_phase_id || '';
-  }
-  select.disabled = p.archived;
+  fillBookingSelect($('phaseSelect'), [{ id: '', name: 'No phase (unassigned)' }, ...live.phases.filter((ph) => !isMilestone(ph))], p.active_phase_id, p.archived);
+  fillBookingSelect($('featureSelect'), [{ id: '', name: 'No feature (unassigned)' }, ...live.features], p.active_feature_id, p.archived);
   $('timerBtn').disabled = p.archived;
   $('archivedBanner').classList.toggle('hidden', !p.archived);
   renderTimer();
+}
+
+function fillBookingSelect(select, options, value, disabled) {
+  if (document.activeElement !== select) {
+    select.innerHTML = options.map((o) => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
+    select.value = value || '';
+  }
+  select.disabled = disabled;
 }
 
 function renderTimer() {
@@ -105,11 +112,13 @@ function renderTimer() {
 }
 
 $('timerBtn').addEventListener('click', () => {
-  const p = detail.project;
-  (p.is_running ? api.pause() : api.start(p.id)).catch((err) => alert(String(err)));
+  toggleTimer(detail.project, (action) => action().catch((err) => alert(String(err))));
 });
 $('phaseSelect').addEventListener('change', (e) => {
   api.setActivePhase(PROJECT_ID, e.target.value || null).catch((err) => alert(String(err)));
+});
+$('featureSelect').addEventListener('change', (e) => {
+  api.setActiveFeature(PROJECT_ID, e.target.value || null).catch((err) => alert(String(err)));
 });
 $('restoreBtn').addEventListener('click', () => api.restoreProject(PROJECT_ID));
 
@@ -118,7 +127,7 @@ $('restoreBtn').addEventListener('click', () => api.restoreProject(PROJECT_ID));
 function setTab(name) {
   tab = name;
   document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
-  for (const t of ['overview', 'schedule', 'report']) {
+  for (const t of ['overview', 'schedule', 'features', 'history', 'report']) {
     $(`tab${t[0].toUpperCase()}${t.slice(1)}`).classList.toggle('hidden', t !== name);
   }
   render();
@@ -201,6 +210,37 @@ $('todayBtn').addEventListener('click', () => scrollToToday($('ganttHost')));
 $('addPhaseBtn').addEventListener('click', () => openPhaseDialog({ project: detail.project, phases: detail.phases, newKind: 'phase' }));
 $('addMilestoneBtn').addEventListener('click', () => openPhaseDialog({ project: detail.project, phases: detail.phases, newKind: 'milestone' }));
 
+// ---------------------------------------------------------------- features tab
+
+function renderFeatures(live, m) {
+  $('addFeatureBtn').disabled = live.project.archived;
+  $('featuresHost').innerHTML = m.featureRows.length
+    ? featureTableHtml(m, { editable: !live.project.archived })
+    : '<div class="empty-note">No features yet. Add one for each piece of work, then pick it next to the timer to see how much time it takes.</div>';
+}
+
+$('addFeatureBtn').addEventListener('click', () => openFeatureDialog({ project: detail.project, features: detail.features }));
+$('featuresHost').addEventListener('click', (e) => {
+  const id = e.target.closest('tr[data-feature]')?.dataset.feature;
+  const feature = detail.features.find((f) => f.id === id);
+  if (feature) openFeatureDialog({ project: detail.project, features: detail.features, feature });
+});
+
+// ---------------------------------------------------------------- history tab
+
+function renderHistory(live) {
+  const rows = sessionRows(live);
+  $('historyHost').innerHTML = rows.length
+    ? sessionTableHtml(rows, { editable: !live.project.archived })
+    : '<div class="empty-note">No sessions yet. Each time the timer stops, the session appears here.</div>';
+}
+
+$('historyHost').addEventListener('click', (e) => {
+  const id = e.target.closest('tr[data-session]')?.dataset.session;
+  const session = detail.sessions.find((s) => s.id === id);
+  if (session) editNote(session).catch((err) => alert(String(err)));
+});
+
 // ---------------------------------------------------------------- report tab
 
 const reportAuthor = $('reportAuthor');
@@ -212,6 +252,8 @@ function reportOptions() {
     author: reportAuthor.value.trim(),
     notes: $('reportNotes').value,
     includePhases: $('optPhases').checked,
+    includeFeatures: $('optFeatures').checked,
+    includeSessions: $('optSessions').checked,
     includeCharts: $('optCharts').checked,
     includeBilling: $('optBilling').checked,
     version: appVersion,

@@ -7,8 +7,8 @@
 import { burnupSvg, donutSvg, ganttSvg, weeklyBarsSvg } from '../core/charts.js';
 import { addDays, dayKey, daysBetween, escapeHtml, fmtDate, fmtHours, money, pct } from '../core/format.js';
 import { bill } from '../core/model.js';
-import { burnupLegendHtml, healthPill, kpiTilesHtml, notesHtml, phaseTableHtml, progressBarsHtml } from './blocks.js';
-import { burnupSeries, isMilestone, phaseStatusLabel, summarySentence, weeklySeries } from './metrics.js';
+import { burnupLegendHtml, featureTableHtml, healthPill, kpiTilesHtml, notesHtml, phaseTableHtml, progressBarsHtml, sessionTableHtml } from './blocks.js';
+import { burnupSeries, isMilestone, phaseStatusLabel, sessionRows, summarySentence, weeklySeries } from './metrics.js';
 import { REPORT_CSS } from './report-style.js';
 
 const UPCOMING_DAYS = 30;
@@ -75,7 +75,7 @@ function upcomingHtml(m) {
 }
 
 /**
- * opts: { author, notes, includeBilling, includePhases, includeCharts, version }
+ * opts: { author, notes, includeBilling, includePhases, includeFeatures, includeSessions, includeCharts, version }
  */
 export function reportHtml(live, m, opts) {
   const { project } = live;
@@ -123,6 +123,9 @@ export function reportHtml(live, m, opts) {
       <div class="ch-legend"><span><i class="lg-progress"></i>Progress</span><span><i class="lg-remaining"></i>Remaining</span><span><i class="lg-today"></i>Today</span><span><i class="lg-due"></i>Due date</span></div>`, 'rpt-wide'));
   }
   if (opts.includePhases) parts.push(section('Hours by phase', phaseTableHtml(m)));
+  if (opts.includeFeatures && m.featureRows.length) parts.push(section('Hours by feature', featureTableHtml(m)));
+  const noted = opts.includeSessions ? sessionRows(live).filter((s) => s.note) : [];
+  if (noted.length) parts.push(section('Session notes', sessionTableHtml(noted), 'rpt-wide'));
   if (opts.includeCharts) {
     parts.push(`<div class="rpt-two">
       ${section('Hours per week', weeklyBarsSvg(weeklySeries(live.daily, m), { W: 420, H: 200 }))}

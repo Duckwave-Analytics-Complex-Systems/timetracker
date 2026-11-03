@@ -1,7 +1,7 @@
 // HTML building blocks shared by the Overview tab and the report, so both
 // always show the same numbers the same way. They return markup strings and
 // are styled by css/project.css (app, dark) and report-style.js (report, light).
-import { escapeHtml, fmtDate, fmtDay, fmtHours, money, pct } from '../core/format.js';
+import { escapeHtml, fmtDate, fmtDay, fmtHM, fmtHours, fmtTime, money, pct } from '../core/format.js';
 import { bill } from '../core/model.js';
 import { HEALTH, isMilestone, phaseStatusLabel } from './metrics.js';
 
@@ -118,6 +118,52 @@ export function phaseTableHtml(m) {
           <td class="num">${m.estimatedH > 0 ? fmtHours(m.estimatedH) : '—'}</td>
           <td class="num${totalRemaining < 0 ? ' over' : ''}">${totalRemaining == null ? '—' : fmtHours(totalRemaining)}</td>
         </tr></tfoot>
+      </table>
+    </div>`;
+}
+
+/** Closed sessions (`sessionRows`). With `editable`, rows carry the id the History tab clicks on. */
+export function sessionTableHtml(rows, { editable = false } = {}) {
+  const body = rows.map((s) => `
+    <tr${editable ? ` class="row-link" data-session="${escapeHtml(s.id)}" title="Edit note"` : ''}>
+      <td class="nowrap">${fmtDate(new Date(s.start_ts))}</td>
+      <td class="nowrap">${fmtTime(s.start_ts)} – ${fmtTime(s.end_ts)}</td>
+      <td class="num">${fmtHM(s.seconds)}</td>
+      <td>${escapeHtml(s.phaseName)}</td>
+      <td>${escapeHtml(s.featureName)}</td>
+      <td class="session-note">${escapeHtml(s.note ?? '')}</td>
+    </tr>`);
+  return `
+    <div class="table-wrap">
+      <table class="ptable">
+        <thead><tr><th>Date</th><th>Time</th><th class="num">Tracked</th><th>Phase</th><th>Feature</th><th>Note</th></tr></thead>
+        <tbody>${body.join('')}</tbody>
+      </table>
+    </div>`;
+}
+
+/** Per-feature hours. With `editable`, rows carry the id the Features tab clicks on. */
+export function featureTableHtml(m, { editable = false } = {}) {
+  const rows = m.featureRows.map((r) => `
+    <tr${editable ? ` class="row-link" data-feature="${escapeHtml(r.id)}" title="Edit"` : ''}>
+      <td><span class="dot" style="background:var(--cat-${r.color + 1})"></span>${escapeHtml(r.name)}</td>
+      <td class="num">${fmtHours(r.spentH)}</td>
+      <td class="num">${pct(r.share)}</td>
+    </tr>`);
+  if (m.featureUnassignedH >= 0.01) {
+    rows.push(`
+      <tr class="muted-row">
+        <td><span class="dot" style="background:var(--cat-other)"></span>Unassigned</td>
+        <td class="num">${fmtHours(m.featureUnassignedH)}</td>
+        <td class="num">${pct(m.spentH > 0 ? m.featureUnassignedH / m.spentH : 0)}</td>
+      </tr>`);
+  }
+  return `
+    <div class="table-wrap">
+      <table class="ptable">
+        <thead><tr><th>Feature</th><th class="num">Tracked</th><th class="num">Share</th></tr></thead>
+        <tbody>${rows.join('')}</tbody>
+        <tfoot><tr><td>Total</td><td class="num">${fmtHours(m.spentH)}</td><td></td></tr></tfoot>
       </table>
     </div>`;
 }

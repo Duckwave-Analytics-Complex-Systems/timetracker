@@ -21,10 +21,15 @@ safety.
   rate × people). Only one timer runs at a time.
 - **Today strip and Stats**: hours today, then 7 days / 30 days / 12 weeks
   with totals, averages, best day, billed amount and a per-project breakdown.
-- **Project window**: Overview (health, key figures, hours per phase and
-  week), Schedule (Gantt of phases and milestones), and Report (a printable,
-  self-contained HTML progress report).
+- **Project window**: Overview (health, key figures, hours per phase, feature
+  and week), Schedule (Gantt of phases and milestones), Features, and Report
+  (a printable, self-contained HTML progress report).
 - **Hours per phase**: time is booked to the phase you pick.
+- **Hours per feature**: split a project into named pieces of work and see
+  how much time each one took. Features are independent of phases, so a session can have a phase, a feature, both or neither.
+- **Session notes**: optionally write what was done when the timer starts or
+  stops (Settings → Session notes, off by default). The History tab lists every
+  session and lets you add or edit its note, and the report can include them.
 - **Archive**: file finished projects without losing their history.
 - **Honest time**: sleep and time while the app is closed are never billed.
 - **CSV export** of every project's time and bill.
@@ -115,7 +120,7 @@ as before. Once signed in, every computer, and the companion Android app,
 using the same account shares the same projects.
 
 - **What syncs.** Projects (name, rate, people, filed state, plan fields),
-  phases, and every tracked session. Each device rebuilds its totals and
+  features, phases, and every tracked session. Each device rebuilds its totals and
   per-day hours from the sessions, so all devices agree.
 - **One timer across devices.** Starting a project on one device stops the
   timer running on any other. If two devices start a timer while offline,

@@ -6,7 +6,7 @@
 //! A background thread runs one sync cycle every `INTERVAL`, and soon after
 //! any local change (`poke()`, called from `events::notify`):
 //!
-//! 1. push queued rows (projects, phases, entries; deletes as tombstones)
+//! 1. push queued rows (projects, features, phases, entries; deletes as tombstones)
 //! 2. pull rows changed on the server since the last cursor
 //! 3. timer: push this device's start/stop through `push_timer()`, then
 //!    reconcile the local timer with the row the server returns

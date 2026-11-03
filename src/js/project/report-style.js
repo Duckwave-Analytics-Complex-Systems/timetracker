@@ -88,6 +88,7 @@ export const REPORT_CSS = `
 .rpt .ptable tfoot td { font-weight: 700; border-bottom: none; border-top: 2px solid var(--line); }
 .rpt .ptable .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rpt .ptable .nowrap { white-space: nowrap; }
+.rpt .ptable .session-note { white-space: pre-wrap; overflow-wrap: anywhere; }
 .rpt .ptable .over { color: var(--bad); font-weight: 700; }
 .rpt .muted-row td { color: var(--ink-3); }
 .rpt .dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 7px; vertical-align: 0; }

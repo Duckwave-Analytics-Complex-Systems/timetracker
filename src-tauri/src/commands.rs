@@ -4,7 +4,7 @@
 //! `notify` the windows when data changed. JS calls these through
 //! js/core/api.js, which is the only place `invoke` names appear.
 
-use crate::db::{self, DailyRow, DayTotal, Db, Phase, PhaseInput, PlanInput, Project, RecoveredRun};
+use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session};
 use crate::events::{notify, Change};
 use crate::sync::{self as cloud, SyncStatus};
 use crate::{now_ms, watchdog};
@@ -86,16 +86,29 @@ pub fn reset_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<()>
 // ---------------------------------------------------------------- timer
 
 #[tauri::command]
-pub fn start_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<()> {
-    db.start_project(&id, now_ms()).map_err(msg)?;
+pub fn start_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<Vec<ClosedSession>> {
+    let closed = db.start_project(&id, now_ms()).map_err(msg)?;
     notify(&app, Change::Timer);
-    Ok(())
+    Ok(closed)
 }
 
 /// Only one timer can run, so this pauses whatever is running.
 #[tauri::command]
-pub fn pause_timer(app: AppHandle, db: State<Db>) -> CmdResult<()> {
-    db.pause_all_running(now_ms()).map_err(msg)?;
+pub fn pause_timer(app: AppHandle, db: State<Db>) -> CmdResult<Vec<ClosedSession>> {
+    let closed = db.stop_timer(now_ms()).map_err(msg)?;
+    notify(&app, Change::Timer);
+    Ok(closed)
+}
+
+/// The note of the open session. Nothing shows it until the session closes.
+#[tauri::command]
+pub fn set_run_note(db: State<Db>, project_id: String, note: Option<String>) -> CmdResult<()> {
+    db.set_run_note(&project_id, note.as_deref()).map_err(msg)
+}
+
+#[tauri::command]
+pub fn set_entry_note(app: AppHandle, db: State<Db>, entry_id: String, note: Option<String>) -> CmdResult<()> {
+    db.set_entry_note(&entry_id, note.as_deref()).map_err(msg)?;
     notify(&app, Change::Timer);
     Ok(())
 }
@@ -123,6 +136,8 @@ pub fn take_recovered_runs(recovered: State<Recovered>) -> Vec<RecoveredRun> {
 pub struct ProjectDetail {
     project: Project,
     phases: Vec<Phase>,
+    features: Vec<Feature>,
+    sessions: Vec<Session>,
     daily: Vec<DayTotal>,
 }
 
@@ -132,6 +147,8 @@ pub fn get_project_detail(db: State<Db>, id: String) -> CmdResult<ProjectDetail>
     Ok(ProjectDetail {
         project,
         phases: db.list_phases(&id).map_err(msg)?,
+        features: db.list_features(&id).map_err(msg)?,
+        sessions: db.list_sessions(&id).map_err(msg)?,
         daily: db.project_daily(&id).map_err(msg)?,
     })
 }
@@ -162,6 +179,31 @@ pub fn delete_phase(app: AppHandle, db: State<Db>, id: String) -> CmdResult<()> 
 #[tauri::command]
 pub fn set_active_phase(app: AppHandle, db: State<Db>, project_id: String, phase_id: Option<String>) -> CmdResult<()> {
     db.set_active_phase(&project_id, phase_id.as_deref(), now_ms()).map_err(msg)?;
+    notify(&app, Change::Timer);
+    Ok(())
+}
+
+// ---------------------------------------------------------------- features
+
+#[tauri::command]
+pub fn save_feature(app: AppHandle, db: State<Db>, feature: FeatureInput) -> CmdResult<String> {
+    let feature = feature.normalized()?;
+    let id = db.save_feature(&feature, now_ms()).map_err(msg)?;
+    notify(&app, Change::Schedule);
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn delete_feature(app: AppHandle, db: State<Db>, id: String) -> CmdResult<()> {
+    db.delete_feature(&id).map_err(msg)?;
+    notify(&app, Change::Schedule);
+    Ok(())
+}
+
+/// Which feature new time is booked to (`None` = unassigned).
+#[tauri::command]
+pub fn set_active_feature(app: AppHandle, db: State<Db>, project_id: String, feature_id: Option<String>) -> CmdResult<()> {
+    db.set_active_feature(&project_id, feature_id.as_deref(), now_ms()).map_err(msg)?;
     notify(&app, Change::Timer);
     Ok(())
 }

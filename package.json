@@ -5,6 +5,7 @@
   "private": true,
   "author": "Duckwave Physics Inspired, Modeling and Analytics",
   "contributors": [
+    "@brenvillasenorf",
     "@pplalo"
   ],
   "scripts": {

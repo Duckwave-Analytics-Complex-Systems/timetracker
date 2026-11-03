@@ -1,5 +1,6 @@
-// Settings panel (top-left ☰): keep on top, CSV export, accent colors.
+// Settings panel (top-left ☰): keep on top, session notes, CSV export, accent colors.
 import { api } from '../core/api.js';
+import { notePrompt, setNotePrompt } from '../core/session-notes.js';
 import { appWindow, saveDialog, writeTextFile } from '../core/tauri.js';
 import { applyTheme, DEFAULT_THEME, readTheme, saveTheme } from '../core/theme.js';
 
@@ -16,6 +17,9 @@ panel.addEventListener('click', (e) => e.stopPropagation());
 document.addEventListener('click', () => panel.classList.add('hidden'));
 
 $('pinToggle').addEventListener('change', (e) => appWindow.setAlwaysOnTop(e.target.checked));
+
+$('notePromptSelect').value = notePrompt();
+$('notePromptSelect').addEventListener('change', (e) => setNotePrompt(e.target.value));
 
 function setTheme(theme, persist = true) {
   applyTheme(theme);

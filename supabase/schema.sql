@@ -2,7 +2,7 @@
 --
 -- The desktop app (src-tauri/src/sync.rs, src-tauri/src/db/sync.rs) and the
 -- companion Android app both talk to these tables. Only source data is
--- synced: projects, phases, and closed sessions (time_entries). Totals and
+-- synced: projects, features, phases, and closed sessions (time_entries). Totals and
 -- per-day rows are derived on each device from time_entries.
 --
 -- Rows are never hard-deleted by the apps: a delete is pushed as
@@ -29,6 +29,7 @@ create table if not exists public.projects (
   due_day          text,              -- YYYY-MM-DD
   budget_hours     double precision,
   active_phase_id  text,
+  active_feature_id text,
   deleted          boolean not null default false,
   updated_at       timestamptz not null default clock_timestamp()
 );
@@ -50,6 +51,19 @@ create table if not exists public.phases (
   updated_at       timestamptz not null default clock_timestamp()
 );
 
+-- Named pieces of work, tracked independently of phases.
+create table if not exists public.features (
+  id               text primary key,
+  user_id          uuid not null default auth.uid() references auth.users on delete cascade,
+  project_id       text,
+  name             text,
+  color            integer,
+  sort_order       integer,
+  created_at       bigint,
+  deleted          boolean not null default false,
+  updated_at       timestamptz not null default clock_timestamp()
+);
+
 -- One row per closed session. Sessions closed after sync was added have the
 -- id "<project_id>@<start_ms>", so two devices booking the same session
 -- write the same row.
@@ -61,6 +75,8 @@ create table if not exists public.time_entries (
   end_ts           bigint,            -- unix ms
   seconds          bigint,
   phase_id         text,
+  feature_id       text,
+  note             text,              -- what was done in this session
   deleted          boolean not null default false,
   updated_at       timestamptz not null default clock_timestamp()
 );
@@ -77,6 +93,12 @@ create table if not exists public.timers (
   updated_at       timestamptz not null default clock_timestamp()
 );
 
+-- Columns added after these tables first shipped (databases that already exist).
+alter table public.projects add column if not exists active_feature_id text;
+alter table public.time_entries add column if not exists feature_id text;
+alter table public.time_entries add column if not exists note text;
+
+create index if not exists features_user_updated     on public.features (user_id, updated_at);
 create index if not exists projects_user_updated     on public.projects (user_id, updated_at);
 create index if not exists phases_user_updated       on public.phases (user_id, updated_at);
 create index if not exists time_entries_user_updated on public.time_entries (user_id, updated_at);
@@ -93,7 +115,7 @@ end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['projects', 'phases', 'time_entries', 'timers'] loop
+  foreach t in array array['projects', 'features', 'phases', 'time_entries', 'timers'] loop
     execute format('drop trigger if exists touch_updated_at on public.%I', t);
     execute format(
       'create trigger touch_updated_at before insert or update on public.%I
@@ -106,7 +128,7 @@ end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['projects', 'phases', 'time_entries', 'timers'] loop
+  foreach t in array array['projects', 'features', 'phases', 'time_entries', 'timers'] loop
     execute format('grant select, insert, update on public.%I to authenticated', t);
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists own_rows on public.%I', t);
@@ -160,3 +182,6 @@ begin
 end $$;
 
 grant execute on function public.push_timer(text, text, text, bigint, bigint, text) to authenticated;
+
+-- Make the API see any new tables and columns straight away.
+notify pgrst, 'reload schema';

@@ -32,7 +32,9 @@ const TABLES: &str = "
         budget_hours    REAL,                        -- NULL = sum of phase estimates
         active_phase_id TEXT,                        -- new time is booked to this phase
         -- v6
-        run_device      TEXT                         -- NULL = the open session is this device's; else the cloud device id that started it
+        run_device      TEXT,                        -- NULL = the open session is this device's; else the cloud device id that started it
+        active_feature_id TEXT,                      -- new time is booked to this feature
+        run_note        TEXT                         -- note for the open session; never synced
     );
 
     CREATE TABLE IF NOT EXISTS time_entries (
@@ -41,7 +43,9 @@ const TABLES: &str = "
         start_ts    INTEGER NOT NULL,
         end_ts      INTEGER NOT NULL,
         seconds     INTEGER NOT NULL,
-        phase_id    TEXT                             -- v5, NULL = unassigned
+        phase_id    TEXT,                            -- v5, NULL = unassigned
+        feature_id  TEXT,                            -- v6, NULL = unassigned
+        note        TEXT                             -- v6, what was done in this session
     );
 
     -- v4: tracked seconds per local day per project (drives Today + Stats).
@@ -67,6 +71,16 @@ const TABLES: &str = "
         sort_order       INTEGER NOT NULL DEFAULT 0,
         created_at       INTEGER NOT NULL
     );
+
+    -- v6: named pieces of work, tracked independently of phases.
+    CREATE TABLE IF NOT EXISTS features (
+        id          TEXT PRIMARY KEY,
+        project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        color       INTEGER NOT NULL DEFAULT 0,      -- palette slot 0..7 (--cat-1..--cat-8)
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        created_at  INTEGER NOT NULL
+    );
 ";
 
 /// Indexes are created after `ensure_column`, since some cover v5 columns.
@@ -74,6 +88,8 @@ const INDEXES: &str = "
     CREATE INDEX IF NOT EXISTS idx_entries_project ON time_entries(project_id);
     CREATE INDEX IF NOT EXISTS idx_entries_phase   ON time_entries(phase_id);
     CREATE INDEX IF NOT EXISTS idx_phases_project  ON phases(project_id);
+    CREATE INDEX IF NOT EXISTS idx_entries_feature ON time_entries(feature_id);
+    CREATE INDEX IF NOT EXISTS idx_features_project ON features(project_id);
 ";
 
 pub(super) fn migrate(conn: &mut Connection) -> SqlResult<()> {
@@ -94,6 +110,10 @@ pub(super) fn migrate(conn: &mut Connection) -> SqlResult<()> {
     }
     ensure_column(conn, "time_entries", "phase_id", "TEXT")?; // v5
     ensure_column(conn, "projects", "run_device", "TEXT")?; // v6
+    ensure_column(conn, "projects", "active_feature_id", "TEXT")?; // v6
+    ensure_column(conn, "time_entries", "feature_id", "TEXT")?; // v6
+    ensure_column(conn, "projects", "run_note", "TEXT")?; // v6
+    ensure_column(conn, "time_entries", "note", "TEXT")?; // v6
 
     conn.execute_batch(INDEXES)?;
     conn.execute_batch(super::sync::SYNC_TABLES)?; // v6
