@@ -129,7 +129,7 @@ export function phaseTableHtml(m) {
 export function sessionTableHtml(rows, { editable = false } = {}) {
   const showPerson = rows.some((s) => s.user_name);
   const body = rows.map((s) => `
-    <tr${editable && s.mine ? ` class="row-link" data-session="${escapeHtml(s.id)}" title="Edit note"` : ''}>
+    <tr${editable && s.mine ? ` class="row-link" data-session="${escapeHtml(s.id)}" title="Edit note or delete"` : ''}>
       <td class="nowrap">${fmtDate(new Date(s.start_ts))}</td>
       <td class="nowrap">${fmtTime(s.start_ts)} – ${fmtTime(s.end_ts)}</td>
       ${showPerson ? `<td>${escapeHtml(s.user_name ?? '')}</td>` : ''}

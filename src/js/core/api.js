@@ -23,6 +23,7 @@ export const api = {
   pause: () => invoke('pause_timer'),
   setRunNote: (projectId, note) => invoke('set_run_note', { projectId, note }),
   setEntryNote: (entryId, note) => invoke('set_entry_note', { entryId, note }),
+  deleteEntry: (entryId) => invoke('delete_entry', { entryId }),
   sync: () => invoke('sync'),
   takeRecoveredRuns: () => invoke('take_recovered_runs'),
   setActivePhase: (projectId, phaseId) => invoke('set_active_phase', { projectId, phaseId }),

@@ -127,6 +127,14 @@ pub fn set_entry_note(app: AppHandle, db: State<Db>, entry_id: String, note: Opt
     Ok(())
 }
 
+/// Deletes one of your closed sessions (History tab).
+#[tauri::command]
+pub fn delete_entry(app: AppHandle, db: State<Db>, entry_id: String) -> CmdResult<()> {
+    db.delete_entry(&entry_id).map_err(msg)?;
+    notify(&app, Change::Timer);
+    Ok(())
+}
+
 /// Runs a watchdog check right now. The frontend calls this when its own
 /// clock jumps (it was just woken up), instead of waiting for the next tick.
 #[tauri::command]

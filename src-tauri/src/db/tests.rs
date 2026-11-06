@@ -313,6 +313,25 @@ fn switching_feature_keeps_the_note_on_both_parts() {
 }
 
 #[test]
+fn deleting_a_session_takes_its_time_back_out() {
+    let db = fresh("delete_entry");
+    db.create_project("a", "A", 0.0, 1, 0).unwrap();
+    db.start_project("a", T0).unwrap();
+    db.stop_timer(T0 + 60_000).unwrap();
+    db.start_project("a", T0 + 120_000).unwrap();
+    let left_running = db.stop_timer(T0 + 120_000 + 5 * H * 1000).unwrap();
+    assert_eq!(project(&db, "a").total_seconds, 60 + 5 * H);
+    db.conn().execute("DELETE FROM sync_outbox", []).unwrap();
+
+    assert!(db.delete_entry(&left_running[0].entry_id).unwrap());
+    assert_eq!(project(&db, "a").total_seconds, 60);
+    assert_eq!(daily_sum(&db), 60);
+    assert_eq!(entry_count(&db), 1);
+    assert_eq!(db.unsynced_changes().unwrap(), 1, "the delete goes up as a tombstone");
+    assert!(!db.delete_entry(&left_running[0].entry_id).unwrap(), "already gone");
+}
+
+#[test]
 fn a_database_from_before_features_gains_them_and_picks_up_the_new_trigger() {
     let dir = temp_dir("feature_upgrade");
     std::fs::create_dir_all(&dir).unwrap();
@@ -778,6 +797,27 @@ mod cloud {
         desk.sync(&mut server, T0 + 9_000);
         assert_eq!(session_note(&desk.db, &id).as_deref(), Some("Edited"));
         assert_eq!(project(&desk.db, "a").total_seconds, 5); // a note changes no totals
+    }
+
+    #[test]
+    fn a_deleted_session_disappears_on_the_other_device() {
+        let mut server = Server::default();
+        let mut desk = Device::new("sync_del_desk", "desk");
+        let mut phone = Device::new("sync_del_phone", "phone");
+
+        desk.db.create_project("a", "A", 0.0, 1, T0).unwrap();
+        desk.db.start_project("a", T0).unwrap();
+        desk.db.stop_timer(T0 + 5_000).unwrap();
+        desk.sync(&mut server, T0 + 6_000);
+        phone.sync(&mut server, T0 + 7_000);
+        assert_eq!(project(&phone.db, "a").total_seconds, 5);
+
+        assert!(desk.db.delete_entry(&session_id("a", T0)).unwrap());
+        desk.sync(&mut server, T0 + 8_000);
+        phone.sync(&mut server, T0 + 9_000);
+        assert_eq!(entry_count(&phone.db), 0);
+        assert_eq!(project(&phone.db, "a").total_seconds, 0);
+        assert_eq!(daily_sum(&phone.db), 0);
     }
 
     #[test]

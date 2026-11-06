@@ -70,6 +70,7 @@ fn main() {
             commands::start_project,
             commands::set_run_note,
             commands::set_entry_note,
+            commands::delete_entry,
             commands::pause_timer,
             commands::sync,
             commands::take_recovered_runs,

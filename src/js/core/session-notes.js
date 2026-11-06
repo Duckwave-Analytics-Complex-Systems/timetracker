@@ -8,6 +8,7 @@ import { fmtDate, fmtHM, fmtTime } from './format.js';
 
 const PROMPT_KEY = 'timetrack:note-prompt';
 const NOTE_MAX_LENGTH = 2000;
+const DELETE = Symbol('delete'); // askNote's answer when Delete session was clicked
 
 /** When to ask: 'off' | 'stop' | 'both'. */
 export function notePrompt() {
@@ -34,30 +35,37 @@ function noteDialog() {
       <p class="field-hint" data-hint></p>
       <label class="field"><span data-label></span><textarea rows="4" maxlength="${NOTE_MAX_LENGTH}"></textarea></label>
       <div class="dialog-actions">
+        <button type="button" class="btn-danger hidden" data-delete>Delete session</button>
+        <span class="spacer"></span>
         <button type="button" class="btn-secondary" data-skip></button>
         <button type="submit" class="btn-primary" value="save">Save</button>
       </div>
     </form>`;
   dialog.querySelector('[data-skip]').addEventListener('click', () => dialog.close(''));
+  dialog.querySelector('[data-delete]').addEventListener('click', () => dialog.close('delete'));
   document.body.append(dialog);
   return dialog;
 }
 
-/** Resolves to the text, or null if the user didn't save. */
-function askNote({ title, hint, note, label = 'What was done', skipLabel = 'Skip' }) {
+/**
+ * Resolves to the text, null if the user didn't save, or DELETE if they
+ * clicked Delete session (only offered with `deletable`).
+ */
+function askNote({ title, hint, note, label = 'What was done', skipLabel = 'Skip', deletable = false }) {
   const d = noteDialog();
   const text = d.querySelector('textarea');
   d.querySelector('[data-title]').textContent = title;
   d.querySelector('[data-hint]').textContent = hint;
   d.querySelector('[data-label]').textContent = label;
   d.querySelector('[data-skip]').textContent = skipLabel;
+  d.querySelector('[data-delete]').classList.toggle('hidden', !deletable);
   text.value = note ?? '';
   d.returnValue = '';
   d.showModal();
   text.focus();
   text.setSelectionRange(text.value.length, text.value.length);
   return new Promise((resolve) => {
-    d.addEventListener('close', () => resolve(d.returnValue === 'save' ? text.value : null), { once: true });
+    d.addEventListener('close', () => resolve(d.returnValue === 'save' ? text.value : d.returnValue === 'delete' ? DELETE : null), { once: true });
   });
 }
 
@@ -87,13 +95,27 @@ export async function toggleTimer(p, run) {
   }
 }
 
-/** Adds or edits the note of a closed session, from the History tab. */
+/**
+ * Adds or edits the note of a closed session, from the History tab. The same
+ * dialog can delete the session, e.g. a timer that was left running.
+ */
 export async function editNote(session) {
+  const when = `${fmtDate(new Date(session.start_ts))}, ${fmtTime(session.start_ts)} – ${fmtTime(session.end_ts)} · ${fmtHM(session.seconds)}`;
   const note = await askNote({
     title: session.note ? 'Edit note' : 'Add note',
-    hint: `${fmtDate(new Date(session.start_ts))}, ${fmtTime(session.start_ts)} · ${fmtHM(session.seconds)}`,
+    hint: when,
     note: session.note,
     skipLabel: 'Cancel',
+    deletable: true,
   });
-  if (note !== null) await api.setEntryNote(session.id, note);
+  if (note === DELETE) {
+    if (confirm(`Delete this session?
+${when}
+
+Its time comes off the project and your daily totals. This can't be undone.`)) {
+      await api.deleteEntry(session.id);
+    }
+  } else if (note !== null) {
+    await api.setEntryNote(session.id, note);
+  }
 }

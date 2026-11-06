@@ -12,7 +12,7 @@
 //! launch at `last_alive_at`, the last moment the app was known to be
 //! running. Time while the app was closed is never billed.
 
-use super::days::record_daily;
+use super::days::{record_daily, unrecord_daily};
 use super::Db;
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use serde::Serialize;
@@ -215,6 +215,31 @@ impl Db {
             params![clean_note(note), entry_id],
         )?;
         Ok(())
+    }
+
+    /// Deletes one of your closed sessions, e.g. a timer left running by
+    /// mistake, and takes its time back out of the project total and the
+    /// per-day ledger. A teammate's session can't be deleted here. The delete
+    /// syncs as a tombstone (`sync_entry_del`). Returns whether a row went.
+    pub fn delete_entry(&self, entry_id: &str) -> SqlResult<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let entry: Option<(String, i64, i64)> = tx
+            .query_row(
+                "SELECT project_id, start_ts, seconds FROM time_entries WHERE id = ?1 AND user_id IS NULL",
+                params![entry_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((project_id, start_ts, seconds)) = entry else { return Ok(false) };
+        tx.execute("DELETE FROM time_entries WHERE id = ?1", params![entry_id])?;
+        tx.execute(
+            "UPDATE projects SET total_seconds = MAX(0, total_seconds - ?1) WHERE id = ?2",
+            params![seconds, project_id],
+        )?;
+        unrecord_daily(&tx, &project_id, start_ts / 1000, seconds)?;
+        tx.commit()?;
+        Ok(true)
     }
 
     /// A project's closed sessions, newest first.
