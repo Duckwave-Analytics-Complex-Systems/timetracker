@@ -6,6 +6,7 @@ import { colorVar, slotOf } from './colors.js';
 import { state } from './store.js';
 
 const RANGE_STORAGE_KEY = 'timetrack:stats-range';
+const SCOPE_STORAGE_KEY = 'timetrack:stats-scope';
 const GAP = 2; // px of surface between stacked segments
 const RANGES = {
   '7d': { n: 7, span: 1, label: 'last 7 days', title: 'Hours per day' },
@@ -18,9 +19,13 @@ const chartHost = $('chartHost');
 const chartWrap = $('chartWrap');
 const tipEl = $('chartTip');
 const rangeSeg = $('rangeSeg');
+const scopeSeg = $('scopeSeg');
 
 let statsRange = localStorage.getItem(RANGE_STORAGE_KEY);
 if (!RANGES[statsRange]) statsRange = '7d';
+// 'mine' = projects that aren't shared; 'all' = everything, shared ones included.
+let statsScope = localStorage.getItem(SCOPE_STORAGE_KEY);
+if (statsScope !== 'mine' && statsScope !== 'all') statsScope = 'all';
 let selectedKey = null; // selected chart column (null = the newest one)
 let currentBuckets = [];
 
@@ -31,10 +36,11 @@ export function resetSelection() { selectedKey = null; }
 
 // ---------------------------------------------------------------- data assembly
 
-function dayMap() {
+/** Per-day seconds by project. `keep(pid)` limits which projects count. */
+function dayMap(keep = () => true) {
   const map = new Map(); // day -> Map(project_id -> seconds)
   const add = (day, pid, s) => {
-    if (!(s > 0)) return;
+    if (!(s > 0) || !keep(pid)) return;
     let m = map.get(day);
     if (!m) { m = new Map(); map.set(day, m); }
     m.set(pid, (m.get(pid) || 0) + s);
@@ -91,6 +97,13 @@ export function renderToday() {
 }
 
 // ---------------------------------------------------------------- Stats
+
+/** The Stats scope as a project filter. */
+function scopeFilter() {
+  if (statsScope === 'all') return () => true;
+  const shared = new Set(state.projects.filter((p) => p.shared).map((p) => p.id));
+  return (pid) => !shared.has(pid);
+}
 
 function buildBuckets(map, cfg) {
   const t0 = startOfToday();
@@ -217,13 +230,14 @@ function meterRows(host, rows, emptyMsg) {
 
 export function renderStats() {
   const cfg = RANGES[statsRange];
-  const map = dayMap();
+  const map = dayMap(scopeFilter());
   const buckets = buildBuckets(map, cfg);
   currentBuckets = buckets;
   if (!buckets.some((b) => b.key === selectedKey)) selectedKey = buckets[buckets.length - 1].key;
   const sel = buckets.find((b) => b.key === selectedKey);
   const st = computeStats(map, cfg);
 
+  scopeSeg.querySelectorAll('button').forEach((btn) => btn.setAttribute('aria-pressed', String(btn.dataset.scope === statsScope)));
   rangeSeg.querySelectorAll('button').forEach((btn) => btn.setAttribute('aria-pressed', String(btn.dataset.range === statsRange)));
 
   $('tileTotal').textContent = fmtHM(st.total);
@@ -313,5 +327,13 @@ rangeSeg.addEventListener('click', (e) => {
   statsRange = btn.dataset.range;
   try { localStorage.setItem(RANGE_STORAGE_KEY, statsRange); } catch { /* ignore */ }
   selectedKey = null;
+  renderStats();
+});
+
+scopeSeg.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-scope]');
+  if (!btn) return;
+  statsScope = btn.dataset.scope;
+  try { localStorage.setItem(SCOPE_STORAGE_KEY, statsScope); } catch { /* ignore */ }
   renderStats();
 });
