@@ -9,6 +9,7 @@ const RANGE_STORAGE_KEY = 'timetrack:stats-range';
 const SCOPE_STORAGE_KEY = 'timetrack:stats-scope';
 const GAP = 2; // px of surface between stacked segments
 const RANGES = {
+  '1d': { n: 1, span: 1, label: 'today', title: 'Hours today' },
   '7d': { n: 7, span: 1, label: 'last 7 days', title: 'Hours per day' },
   '30d': { n: 30, span: 1, label: 'last 30 days', title: 'Hours per day' },
   '12w': { n: 12, span: 7, label: 'last 12 weeks', title: 'Hours per week' },
@@ -22,12 +23,13 @@ const rangeSeg = $('rangeSeg');
 const scopeSeg = $('scopeSeg');
 
 let statsRange = localStorage.getItem(RANGE_STORAGE_KEY);
-if (!RANGES[statsRange]) statsRange = '7d';
+if (!RANGES[statsRange]) statsRange = '1d';
 // 'mine' = projects that aren't shared; 'all' = everything, shared ones included.
 let statsScope = localStorage.getItem(SCOPE_STORAGE_KEY);
-if (statsScope !== 'mine' && statsScope !== 'all') statsScope = 'all';
+if (statsScope !== 'mine' && statsScope !== 'all') statsScope = 'mine';
 let selectedKey = null; // selected chart column (null = the newest one)
 let currentBuckets = [];
+const expandedDays = new Set(); // Per day rows opened to show their projects (bucket keys)
 
 /** True while the pointer is over the chart: redraws would drop the tooltip. */
 export let chartHover = false;
@@ -228,6 +230,42 @@ function meterRows(host, rows, emptyMsg) {
   }).join('');
 }
 
+/** Per day (or per week): newest first, one stacked bar each; clicking opens its projects. */
+function perDayRows(host, buckets, cfg) {
+  // Short ranges list every day; longer ones only those with time on them.
+  const shown = [...buckets].reverse().filter((b) => cfg.n <= 7 || b.total > 0);
+  if (!shown.length) { host.innerHTML = `<div class="meter-empty">No time tracked in the ${cfg.label}.</div>`; return; }
+  const max = Math.max(1, ...shown.map((b) => b.total));
+  // Keep keyboard focus across the periodic redraw.
+  const focusedKey = host.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+
+  host.innerHTML = shown.map((b) => {
+    const t = b.total;
+    const open = t > 0 && expandedDays.has(b.key);
+    const segs = segmentsFor(b.per);
+    const bar = t > 0
+      ? `<div class="perday-bar" style="width:${Math.max(2, (t / max) * 100).toFixed(1)}%">${segs.map((g) => `<span style="flex:${g.secs};background:${g.color}" title="${escapeHtml(g.name)} · ${fmtHM(g.secs)}"></span>`).join('')}</div>`
+      : '<div class="perday-bar empty" style="width:2%"></div>';
+    const chev = t > 0 ? `<span class="perday-chev" aria-hidden="true">${open ? '▾' : '›'}</span>` : '';
+    let detail = '';
+    if (open) {
+      const rows = rowsFor(b.per);
+      const billed = rows.reduce((a, r) => a + (r.p.hourly_rate > 0 ? bill(r.p, r.secs) : 0), 0);
+      detail = `<div class="perday-detail" id="perday-${b.key}">` +
+        rows.map((r) => `<div class="perday-item"><i style="background:${colorVar(r.pid)}"></i><span class="n">${escapeHtml(r.p.name)}</span><span class="pct">${Math.round((r.secs / t) * 100)}%</span><span class="t">${fmtHM(r.secs)}</span></div>`).join('') +
+        (rows.some((r) => r.p.hourly_rate > 0) ? `<div class="perday-bill">Billed <span class="bill">${money(billed)}</span></div>` : '') +
+        '</div>';
+    }
+    const aria = t > 0
+      ? `aria-expanded="${open}" aria-controls="perday-${b.key}"`
+      : 'aria-disabled="true"';
+    return `<div class="perday"><button type="button" class="perday-btn" data-key="${b.key}" ${aria} title="${t > 0 ? 'Show the projects tracked' : ''}">` +
+      `<span class="perday-top"><span>${escapeHtml(bucketTitle(b, true))}</span><span class="perday-val">${t > 0 ? fmtHM(t) : '0m'}${chev}</span></span>${bar}</button>${detail}</div>`;
+  }).join('');
+
+  if (focusedKey) host.querySelector(`.perday-btn[data-key="${focusedKey}"]`)?.focus();
+}
+
 export function renderStats() {
   const cfg = RANGES[statsRange];
   const map = dayMap(scopeFilter());
@@ -264,6 +302,9 @@ export function renderStats() {
 
   $('projTotal').textContent = st.total > 0 ? fmtHM(st.total) : '';
   meterRows($('projRows'), rowsFor(st.perProject), `No time tracked in the ${cfg.label}.`);
+
+  $('perDayTitle').textContent = cfg.span === 7 ? 'Per week' : 'Per day';
+  perDayRows($('perDayRows'), buckets, cfg);
 
   // screen-reader table view
   $('statsTable').innerHTML =
@@ -320,6 +361,14 @@ chartHost.addEventListener('focusin', (e) => {
   if (hit) showTip(Number(hit.dataset.i), hit);
 });
 chartHost.addEventListener('focusout', hideTip);
+
+$('perDayRows').addEventListener('click', (e) => {
+  const btn = e.target.closest('.perday-btn');
+  if (!btn || btn.getAttribute('aria-disabled') === 'true') return;
+  const key = btn.dataset.key;
+  if (expandedDays.has(key)) expandedDays.delete(key); else expandedDays.add(key);
+  renderStats();
+});
 
 rangeSeg.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-range]');

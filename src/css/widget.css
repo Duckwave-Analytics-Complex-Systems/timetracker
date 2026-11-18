@@ -353,6 +353,44 @@
 .chart-tip .tip-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
 .chart-tip .tip-row .t { font-family: var(--font-mono); font-size: 10.5px; }
 
+/* Per day: one stacked bar per day (or week); click to list its projects. */
+.perday-rows { display: flex; flex-direction: column; gap: 4px; }
+.perday { display: flex; flex-direction: column; }
+.perday-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 2px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.perday-btn:hover:not([aria-disabled="true"]) { background: rgba(255, 255, 255, 0.03); }
+.perday-btn:focus-visible { outline: 2px solid var(--accent-running); outline-offset: 1px; }
+.perday-btn[aria-disabled="true"] { cursor: default; }
+.perday-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 12px; }
+.perday-val { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.perday-chev { display: inline-block; width: 10px; margin-left: 4px; color: var(--text-faint); text-align: center; }
+.perday-bar { display: flex; gap: 2px; height: 6px; border-radius: 3px; overflow: hidden; }
+.perday-bar.empty { background: var(--border-hair); }
+.perday-bar span { min-width: 2px; }
+.perday-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 4px 2px 6px;
+  padding: 8px 0 0 4px;
+  border-top: 1px solid var(--border-hair);
+}
+.perday-item { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-muted); }
+.perday-item i { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.perday-item .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perday-item .pct { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
+.perday-item .t { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); }
+.perday-bill { text-align: right; font-size: 11px; color: var(--text-muted); }
+.perday-bill .bill { color: var(--accent-earnings); font-family: var(--font-mono); }
+
 @media (prefers-reduced-motion: reduce) {
   .project-card.running .ring-wrap { animation: none; }
 }

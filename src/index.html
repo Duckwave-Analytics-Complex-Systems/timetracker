@@ -128,6 +128,7 @@
             <button data-scope="all">All projects</button>
           </div>
           <div id="rangeSeg" class="seg" role="group" aria-label="Period">
+            <button data-range="1d">1 day</button>
             <button data-range="7d">7 days</button>
             <button data-range="30d">30 days</button>
             <button data-range="12w">12 weeks</button>
@@ -167,6 +168,14 @@
             <span id="projTotal" class="panel-total"></span>
           </div>
           <div id="projRows" class="meter-rows"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2 id="perDayTitle">Per day</h2>
+            <span class="panel-hint">Click a day for details</span>
+          </div>
+          <div id="perDayRows" class="perday-rows"></div>
         </div>
 
         <!-- Screen-reader table view of the chart data -->
