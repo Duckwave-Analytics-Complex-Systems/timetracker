@@ -400,6 +400,18 @@
 .heat-cells i, .heat-scale i { display: block; height: 14px; border-radius: 2px; background: var(--border-hair); }
 .heat-axis .heat-cells { grid-template-columns: repeat(4, 1fr); }
 .heat-axis span { font-size: 9.5px; color: var(--text-faint); font-family: var(--font-mono); }
+/* Histogram under the grid: hours per time of day, bars in the same 24 columns. */
+.heat-hist { align-items: stretch; margin-top: 8px; }
+.heat-bars {
+  height: 64px;
+  align-items: end;
+  border-bottom: 1px solid var(--axis);
+  background: linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 100% 50%; /* lines at top and half */
+}
+.heat-bars b { display: block; background: var(--accent-running); opacity: 0.7; border-radius: 2px 2px 0 0; }
+.heat-bars b.peak { opacity: 1; }
+.heat-bars b:hover { opacity: 1; }
+.heat-yaxis { display: flex; flex-direction: column; justify-content: space-between; text-align: right; padding-right: 2px; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); line-height: 1; margin: -4px 0 -4px; }
 .heat-legend { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 10.5px; color: var(--text-faint); }
 .heat-scale { display: flex; align-items: center; gap: 3px; }
 .heat-scale i { width: 10px; height: 10px; }

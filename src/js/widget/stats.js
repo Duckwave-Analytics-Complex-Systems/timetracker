@@ -1,7 +1,7 @@
 // The Today strip (Projects tab) and the Stats tab.
 import { niceScale } from '../core/charts.js';
 import { addDays, dayKey, escapeHtml, fmtDate, fmtHM, fmtTime, money, startOfToday } from '../core/format.js';
-import { HEATMAP_RANGES, HEAT_OPACITY, LEVELS, hourHeatmap, hourLabel, level, withOpenSession } from '../core/heatmap.js';
+import { HEATMAP_RANGES, HEAT_OPACITY, LEVELS, histogramTop, hourHeatmap, hourLabel, level, withOpenSession } from '../core/heatmap.js';
 import { bill, liveAdditions } from '../core/model.js';
 import { colorVar, slotOf } from './colors.js';
 import { state } from './store.js';
@@ -293,6 +293,14 @@ function renderHeatmap(keep) {
   };
   const rows = hm.rows.map((r) =>
     `<div class="heat-row"><span class="heat-label">${escapeHtml(r.label)}</span><div class="heat-cells">${r.cells.map((v, h) => cell(r, v, h)).join('')}</div></div>`).join('');
+  // Histogram: hours tracked in each hour of the day over the period, same columns as the grid.
+  const top = histogramTop(Math.max(...hm.perHour) / 3600);
+  const hrs = (v) => `${Math.round(v * 100) / 100}h`;
+  const bars = hm.perHour.map((secs, h) => {
+    const pct = Math.min(100, (secs / 3600 / top) * 100);
+    return `<b class="${h === hm.peakHour ? 'peak' : ''}" style="height:${secs > 0 ? Math.max(2, pct).toFixed(1) : 0}%" title="${escapeHtml(`${span(h)} · ${fmtHM(secs)}${hm.cfg.days > 1 ? ` in the ${hm.cfg.title}` : ''}`)}"></b>`;
+  }).join('');
+  const hist = `<div class="heat-row heat-hist"><span class="heat-label heat-yaxis" aria-hidden="true"><span>${hrs(top)}</span><span>${hrs(top / 2)}</span><span>0</span></span><div class="heat-cells heat-bars">${bars}</div></div>`;
   const axis = `<div class="heat-row heat-axis" aria-hidden="true"><span class="heat-label"></span><div class="heat-cells">${[0, 6, 12, 18].map((h) => `<span>${hourLabel(h).slice(0, 2)}</span>`).join('')}</div></div>`;
   const legend = `<div class="heat-legend" aria-hidden="true">${perDay ? 'Share of each hour tracked' : 'Total per weekday and hour'}<span class="heat-scale">Less${Array.from({ length: LEVELS + 1 }, (_, i) => heatCell(i)).join('')}More</span></div>`;
 
@@ -307,7 +315,7 @@ function renderHeatmap(keep) {
   }
 
   const label = `Active hours, ${hm.cfg.title}${hm.peakHour != null ? `; most active ${span(hm.peakHour)}` : ''}`;
-  host.innerHTML = `<div class="heat-grid" role="img" aria-label="${escapeHtml(label)}">${rows}${axis}</div>${legend}${list}`;
+  host.innerHTML = `<div class="heat-grid" role="img" aria-label="${escapeHtml(label)}">${rows}${hist}${axis}</div>${legend}${list}`;
 }
 
 export function renderStats() {

@@ -60,6 +60,16 @@ function dayLabel(d, today) {
   return fmtDate(d, { weekday: 'short', day: 'numeric' });
 }
 
+/**
+ * The histogram's y axis: a round top in hours at or above `maxHours`, so the
+ * axis reads 0 / top/2 / top.
+ */
+export function histogramTop(maxHours) {
+  const steps = [0.5, 1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 30, 40, 50, 60, 80, 100, 150, 200, 300, 400, 500];
+  const want = Math.max(maxHours, 0.5);
+  return steps.find((s) => s >= want) ?? Math.ceil(want / 100) * 100;
+}
+
 /** Colour step of a cell: 0 when empty, else 1..LEVELS. */
 export function level(seconds, scale) {
   if (!(seconds > 0) || !(scale > 0)) return 0;
@@ -72,6 +82,7 @@ export function level(seconds, scale) {
  * `keep(projectId)` limits which projects count (the Stats scope).
  *
  * Returns { cfg, rows: [{ key, label, cells: seconds[24] }], scale, total,
+ * perHour: seconds[24] (every row added up, for the histogram),
  * peakHour (null if nothing tracked), sessions: [{ project_id, start, end }] (oldest first) }.
  */
 export function hourHeatmap(spans, rangeKey, { now = Date.now(), keep = () => true } = {}) {
@@ -120,6 +131,7 @@ export function hourHeatmap(spans, rangeKey, { now = Date.now(), keep = () => tr
     rows,
     scale: byDay ? 3600 : max, // per day: a full hour is darkest
     total,
+    perHour,
     peakHour: total > 0 ? peak : null,
     sessions,
   };
