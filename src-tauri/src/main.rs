@@ -64,6 +64,8 @@ fn main() {
             commands::update_project,
             commands::set_project_logo,
             commands::archive_project,
+            commands::end_project,
+            commands::set_final_payment,
             commands::restore_project,
             commands::delete_project,
             commands::reset_project,

@@ -6,7 +6,7 @@
 // edits made here, in the widget, or in another window all show up.
 import { api, onDataChanged } from '../core/api.js';
 import { escapeHtml, fmtDate, fmtHMS, fmtTime, money } from '../core/format.js';
-import { bill, billedPeople, liveSeconds } from '../core/model.js';
+import { bill, billedPeople, effectiveRate, liveSeconds } from '../core/model.js';
 import { appWindow, getAppVersion, saveDialog, writeTextFile } from '../core/tauri.js';
 import { setupTitlebar } from '../core/titlebar.js';
 import { editNote, toggleTimer } from '../core/session-notes.js';
@@ -85,7 +85,11 @@ function renderHeader(live, m) {
   if (p.hourly_rate > 0) meta.push(`<span class="earnings">${money(p.hourly_rate)}/h${billedPeople(p) > 1 ? ` × ${billedPeople(p)}` : ''}</span>`);
   if (p.shared) meta.push(`<span>${p.is_owner ? 'Shared by you' : 'Shared with you'}</span>`);
   meta.push(`<span>Created ${fmtDate(new Date(p.created_at))}</span>`);
-  if (p.archived && p.archived_at) meta.push(`<span>Filed ${fmtDate(new Date(p.archived_at))}</span>`);
+  if (p.archived && p.archived_at) meta.push(`<span>Ended ${fmtDate(new Date(p.archived_at))}</span>`);
+  if (p.final_payment > 0) {
+    const rate = effectiveRate(p, p.total_seconds);
+    meta.push(`<span class="earnings">Paid ${money(p.final_payment)}${rate != null ? ` · ${money(rate)}/h` : ''}</span>`);
+  }
   $('projMeta').innerHTML = meta.join('<span class="sep">·</span>');
 
   fillBookingSelect($('phaseSelect'), [{ id: '', name: 'No phase (unassigned)' }, ...live.phases.filter((ph) => !isMilestone(ph))], p.active_phase_id, p.archived);

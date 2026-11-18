@@ -30,7 +30,9 @@ safety.
 - **Session notes**: optionally write what was done when the timer starts or
   stops (Settings → Session notes, off by default). The History tab lists every
   session and lets you add or edit its note, and the report can include them.
-- **Archive**: file finished projects without losing their history.
+- **End project / Archive**: end finished projects without losing their history,
+  record a final payment for projects without an hourly rate, and compare what
+  each earned per tracked hour.
 - **Honest time**: sleep and time while the app is closed are never billed.
 - **CSV export** of every project's time and bill.
 - **Cloud sync (optional)** through your own Supabase project. See
@@ -119,7 +121,7 @@ Sync is optional. Until you sign in, TimeTrack works entirely offline, exactly
 as before. Once signed in, every computer, and the companion Android app,
 using the same account shares the same projects.
 
-- **What syncs.** Projects (name, rate, people, filed state, plan fields),
+- **What syncs.** Projects (name, rate, people, filed state and final payment, plan fields),
   features, phases, and every tracked session. Each device rebuilds its totals and
   per-day hours from the sessions, so all devices agree.
 - **One timer across devices.** Starting a project on one device stops the
@@ -252,6 +254,11 @@ timetrack/
 - The widget shows when a timer is running on another device.
 - Share a project with other people by their share code. See
   [Sharing a project](#sharing-a-project).
+- **End project** replaces "File (archive)" in a project's ⋯ menu. It still
+  files the project, and asks for a final payment when the project has no
+  hourly rate. The Archive shows each project's earnings and cost per hour,
+  plus totals over all ended projects, and can set or change the payment later.
+  Re-run `supabase/schema.sql` before updating, for the new `final_payment` column.
 
 ### v5.0.0: projects, schedules and reports
 

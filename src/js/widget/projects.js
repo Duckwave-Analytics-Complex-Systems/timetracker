@@ -4,6 +4,7 @@ import { api } from '../core/api.js';
 import { escapeHtml, fmtHMS, money } from '../core/format.js';
 import { bill, billedPeople, liveSeconds } from '../core/model.js';
 import { toggleTimer } from '../core/session-notes.js';
+import { openEndDialog } from './end-project.js';
 import { state, act } from './store.js';
 
 const SORT_STORAGE_KEY = 'timetrack:sort';
@@ -129,11 +130,7 @@ const MENU_ACTIONS = {
       : `Reset all tracked time for "${p.name}"?\nIts schedule is kept.`;
     if (confirm(question)) act(() => api.resetProject(p.id));
   },
-  archive: (p) => {
-    if (confirm(`File "${p.name}"?\nIt leaves this list but keeps all its history. You can restore it from the Archive tab.`)) {
-      act(() => api.archiveProject(p.id));
-    }
-  },
+  end: (p) => openEndDialog(p),
   delete: (p) => {
     const everyone = p.shared ? ` for everyone on it, including their tracked time` : '';
     if (confirm(`Delete "${p.name}"? This removes its tracked time and schedule permanently${everyone}.`)) act(() => api.deleteProject(p.id));
@@ -182,7 +179,7 @@ function openCardMenu(evt, p) {
     { action: 'logo', label: 'Change logo' },
     ...(p.logo_data ? [{ action: 'remove-logo', label: 'Remove logo' }] : []),
     { action: 'reset', label: p.shared ? 'Reset my time' : 'Reset time' },
-    { action: 'archive', label: 'File (archive)' },
+    { action: 'end', label: 'End project' },
     { action: 'delete', label: 'Delete', danger: true },
   ] : [
     { action: 'open', label: 'Open project' },

@@ -2,7 +2,7 @@
 
 use super::timer::pause_all;
 use super::Db;
-use rusqlite::{params, OptionalExtension, Result as SqlResult, Row};
+use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult, Row};
 use serde::{Deserialize, Serialize};
 
 /// A project as the frontend sees it. Field names stay snake_case in JS.
@@ -20,6 +20,9 @@ pub struct Project {
     /// "Filed" projects: hidden from the main list, kept with their history.
     pub archived: bool,
     pub archived_at: Option<i64>,
+    /// What the project paid in the end, entered when it is ended. Mostly for
+    /// projects without an hourly rate; `None` means the bill comes from hours.
+    pub final_payment: Option<f64>,
     /// Small base64 `data:` URL, resized client-side before it gets here.
     pub logo_data: Option<String>,
     /// People billing the tracked time at once. Always >= 1.
@@ -77,7 +80,8 @@ const SELECT_PROJECT: &str = "
            p.active_feature_id, f.name, f.color,
            (SELECT COUNT(*) FROM project_members m WHERE m.project_id = p.id) > 1,
            COALESCE((SELECT m.role FROM project_members m WHERE m.project_id = p.id
-                     AND m.user_id = (SELECT value FROM sync_meta WHERE key = 'user_id')), 'owner') = 'owner'
+                     AND m.user_id = (SELECT value FROM sync_meta WHERE key = 'user_id')), 'owner') = 'owner',
+           p.final_payment
     FROM projects p
     LEFT JOIN phases ph ON ph.id = p.active_phase_id
     LEFT JOIN features f ON f.id = p.active_feature_id";
@@ -108,12 +112,30 @@ fn from_row(r: &Row) -> SqlResult<Project> {
         active_feature_color: r.get(21)?,
         shared: r.get(22)?,
         is_owner: r.get(23)?,
+        final_payment: r.get(24)?,
     })
 }
 
 /// Empty strings from form fields mean "not set".
 fn non_empty(s: &Option<String>) -> Option<&str> {
     s.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
+
+fn positive(amount: Option<f64>) -> Option<f64> {
+    amount.filter(|a| a.is_finite() && *a > 0.0)
+}
+
+/// Pauses the timer if it is running on this project, booking its open session.
+fn stop_if_running(conn: &Connection, id: &str, now: i64) -> SqlResult<()> {
+    let running: bool = conn.query_row(
+        "SELECT is_running FROM projects WHERE id = ?1",
+        params![id],
+        |r| Ok(r.get::<_, i64>(0)? != 0),
+    )?;
+    if running {
+        pause_all(conn, now)?;
+    }
+    Ok(())
 }
 
 impl Db {
@@ -171,24 +193,40 @@ impl Db {
 
     /// Files (`archived = true`) or restores a project. Filing a running
     /// project stops its timer first, so its time is saved up to `now`.
+    /// Restoring keeps any final payment, so ending it again starts from it.
     pub fn set_archived(&self, id: &str, archived: bool, now: i64) -> SqlResult<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         if archived {
-            let running: bool = tx.query_row(
-                "SELECT is_running FROM projects WHERE id = ?1",
-                params![id],
-                |r| Ok(r.get::<_, i64>(0)? != 0),
-            )?;
-            if running {
-                pause_all(&tx, now)?;
-            }
+            stop_if_running(&tx, id, now)?;
         }
         tx.execute(
             "UPDATE projects SET archived = ?1, archived_at = ?2 WHERE id = ?3",
             params![archived as i64, archived.then_some(now), id],
         )?;
         tx.commit()
+    }
+
+    /// Ends a project: files it like `set_archived` and records what it paid
+    /// in total (`None` or a non-positive amount clears it).
+    pub fn end_project(&self, id: &str, final_payment: Option<f64>, now: i64) -> SqlResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        stop_if_running(&tx, id, now)?;
+        tx.execute(
+            "UPDATE projects SET archived = 1, archived_at = ?1, final_payment = ?2 WHERE id = ?3",
+            params![now, positive(final_payment), id],
+        )?;
+        tx.commit()
+    }
+
+    /// Changes the final payment of a project, ended or not.
+    pub fn set_final_payment(&self, id: &str, final_payment: Option<f64>) -> SqlResult<()> {
+        self.conn().execute(
+            "UPDATE projects SET final_payment = ?1 WHERE id = ?2",
+            params![positive(final_payment), id],
+        )?;
+        Ok(())
     }
 
     pub fn delete_project(&self, id: &str) -> SqlResult<()> {

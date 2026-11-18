@@ -71,6 +71,23 @@ pub fn archive_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<(
     Ok(())
 }
 
+/// "End" a project: file it and record what it paid in total, if given.
+#[tauri::command]
+pub fn end_project(app: AppHandle, db: State<Db>, id: String, final_payment: Option<f64>) -> CmdResult<()> {
+    owner_only(&db, &id)?;
+    db.end_project(&id, final_payment, now_ms()).map_err(msg)?;
+    notify(&app, Change::Projects);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_final_payment(app: AppHandle, db: State<Db>, id: String, final_payment: Option<f64>) -> CmdResult<()> {
+    owner_only(&db, &id)?;
+    db.set_final_payment(&id, final_payment).map_err(msg)?;
+    notify(&app, Change::Projects);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn restore_project(app: AppHandle, db: State<Db>, id: String) -> CmdResult<()> {
     owner_only(&db, &id)?;

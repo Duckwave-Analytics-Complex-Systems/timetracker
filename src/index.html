@@ -200,11 +200,12 @@
 
     <!-- ============ Archive view (filed projects) ============ -->
     <section id="viewArchive" class="view hidden" role="tabpanel">
+      <div id="archiveSummary" class="tiles archive-summary hidden"></div>
       <div id="archiveList" class="project-list archive-list"></div>
       <div id="archiveEmpty" class="empty-state hidden">
         <div class="empty-ring"></div>
-        <p>No filed projects.</p>
-        <p class="muted">File a finished project from its ⋯ menu.<br>It keeps its history here without cluttering your list.</p>
+        <p>No ended projects.</p>
+        <p class="muted">End a finished project from its ⋯ menu.<br>It keeps its history here without cluttering your list.</p>
       </div>
     </section>
   </div>
@@ -232,6 +233,29 @@
       <div class="dialog-actions">
         <button type="button" id="dialogCancel" class="btn-secondary">Cancel</button>
         <button type="submit" id="dialogSave" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- End a project: file it, with an optional final payment (js/widget/end-project.js).
+       Also opened from the Archive to change that payment. -->
+  <dialog id="endDialog" class="dialog">
+    <form id="endForm" method="dialog" novalidate>
+      <h2 id="endTitle">End project</h2>
+      <p id="endIntro" class="end-intro"></p>
+      <div class="end-stats">
+        <div><span>Tracked</span><b id="endTime">0m</b></div>
+        <div><span id="endEarnedLabel">Earned</span><b id="endEarned" class="earnings">—</b></div>
+        <div><span>Per hour</span><b id="endRate">—</b></div>
+      </div>
+      <label class="field" id="endPaymentField">
+        <span>Final payment (optional)</span>
+        <input id="endPayment" type="number" min="0" step="0.01" placeholder="0.00" />
+      </label>
+      <p id="endPaymentHint" class="field-hint"></p>
+      <div class="dialog-actions">
+        <button type="button" id="endCancel" class="btn-secondary">Cancel</button>
+        <button type="submit" id="endSubmit" class="btn-primary">End project</button>
       </div>
     </form>
   </dialog>

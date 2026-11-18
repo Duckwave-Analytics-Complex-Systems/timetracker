@@ -27,6 +27,21 @@ export function bill(p, seconds) {
 }
 
 /**
+ * What a project earned: the final payment entered when it was ended, else
+ * its hourly bill. Null when neither is known (no rate, no payment).
+ */
+export function earned(p, seconds) {
+  if (p.final_payment > 0) return p.final_payment;
+  return p.hourly_rate > 0 ? bill(p, seconds) : null;
+}
+
+/** Earned per tracked hour, or null without earnings or time. */
+export function effectiveRate(p, seconds) {
+  const amount = earned(p, seconds);
+  return amount != null && seconds > 0 ? amount / (seconds / 3600) : null;
+}
+
+/**
  * The open session split at local midnight, as [day, projectId, seconds]
  * tuples, to add on top of the per-day rows from the DB. Must bucket days
  * exactly like `split_by_local_day` in db/days.rs.

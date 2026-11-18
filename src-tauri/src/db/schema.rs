@@ -34,7 +34,9 @@ const TABLES: &str = "
         -- v6
         run_device      TEXT,                        -- NULL = the open session is this device's; else the cloud device id that started it
         active_feature_id TEXT,                      -- new time is booked to this feature
-        run_note        TEXT                         -- note for the open session; never synced
+        run_note        TEXT,                        -- note for the open session; never synced
+        -- v6.2
+        final_payment   REAL                         -- set when the project is ended; NULL = bill by hours
     );
 
     CREATE TABLE IF NOT EXISTS time_entries (
@@ -126,6 +128,7 @@ pub(super) fn migrate(conn: &mut Connection) -> SqlResult<()> {
     ensure_column(conn, "projects", "run_note", "TEXT")?; // v6
     ensure_column(conn, "time_entries", "note", "TEXT")?; // v6
     ensure_column(conn, "time_entries", "user_id", "TEXT")?; // v6
+    ensure_column(conn, "projects", "final_payment", "REAL")?; // v6.2
 
     conn.execute_batch(INDEXES)?;
     conn.execute_batch(super::sync::SYNC_TABLES)?; // v6

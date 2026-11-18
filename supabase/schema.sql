@@ -34,6 +34,7 @@ create table if not exists public.projects (
   start_day        text,              -- YYYY-MM-DD
   due_day          text,              -- YYYY-MM-DD
   budget_hours     double precision,
+  final_payment    double precision,  -- total paid, entered when the project is ended
   active_phase_id  text,
   active_feature_id text,
   deleted          boolean not null default false,
@@ -131,6 +132,7 @@ create table if not exists public.member_state (
 alter table public.projects add column if not exists active_feature_id text;
 alter table public.time_entries add column if not exists feature_id text;
 alter table public.time_entries add column if not exists note text;
+alter table public.projects add column if not exists final_payment double precision;
 
 create index if not exists project_members_user       on public.project_members (user_id);
 create index if not exists phases_project             on public.phases (project_id);

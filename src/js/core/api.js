@@ -13,6 +13,9 @@ export const api = {
   updateProject: (id, { name, hourlyRate, peopleCount }) => invoke('update_project', { id, name, hourlyRate, peopleCount }),
   setLogo: (id, dataUrl) => invoke('set_project_logo', { id, dataUrl }),
   archiveProject: (id) => invoke('archive_project', { id }),
+  /** Files the project; finalPayment (total paid, or null) is kept for the Archive. */
+  endProject: (id, finalPayment) => invoke('end_project', { id, finalPayment }),
+  setFinalPayment: (id, finalPayment) => invoke('set_final_payment', { id, finalPayment }),
   restoreProject: (id) => invoke('restore_project', { id }),
   deleteProject: (id) => invoke('delete_project', { id }),
   resetProject: (id) => invoke('reset_project', { id }),

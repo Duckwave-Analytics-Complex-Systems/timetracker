@@ -388,6 +388,33 @@ fn filing_a_running_project_stops_and_hides_it() {
 }
 
 #[test]
+fn ending_a_project_files_it_with_its_final_payment() {
+    let db = fresh("end");
+    db.create_project("a", "A", 0.0, 1, 0).unwrap();
+    db.start_project("a", T0).unwrap();
+    db.end_project("a", Some(1200.0), T0 + 7_200_000).unwrap();
+
+    let p = project(&db, "a");
+    assert!(p.archived && !p.is_running);
+    assert_eq!(p.total_seconds, 2 * H);
+    assert_eq!(p.archived_at, Some(T0 + 7_200_000));
+    assert_eq!(p.final_payment, Some(1200.0));
+
+    // edited later from the Archive; zero or less clears it
+    db.set_final_payment("a", Some(1500.0)).unwrap();
+    assert_eq!(project(&db, "a").final_payment, Some(1500.0));
+    db.set_final_payment("a", Some(0.0)).unwrap();
+    assert_eq!(project(&db, "a").final_payment, None);
+
+    // restoring keeps it; ending without one clears it
+    db.set_final_payment("a", Some(800.0)).unwrap();
+    db.set_archived("a", false, T0 + 8_000_000).unwrap();
+    assert_eq!(project(&db, "a").final_payment, Some(800.0));
+    db.end_project("a", None, T0 + 9_000_000).unwrap();
+    assert_eq!(project(&db, "a").final_payment, None);
+}
+
+#[test]
 fn range_query_reset_and_cascade() {
     let db = fresh("range");
     db.create_project("a", "A", 0.0, 1, 0).unwrap();
@@ -796,6 +823,14 @@ mod cloud {
         phone.sync(&mut server, T0 + 97 * 60_000);
         let p = project(&phone.db, "a");
         assert_eq!((p.name.as_str(), p.people_count), ("Renamed", 2));
+
+        // ending it with a final payment reaches the other side
+        desk.db.end_project("a", Some(900.0), T0 + 97 * 60_000 + 1).unwrap();
+        desk.sync(&mut server, T0 + 97 * 60_000 + 2);
+        phone.sync(&mut server, T0 + 97 * 60_000 + 3);
+        let p = project(&phone.db, "a");
+        assert!(p.archived);
+        assert_eq!(p.final_payment, Some(900.0));
 
         // deleting reaches the other side
         phone.db.delete_project("a").unwrap();

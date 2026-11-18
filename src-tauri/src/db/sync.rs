@@ -58,7 +58,7 @@ pub(super) const SYNC_TABLES: &str = "
     DROP TRIGGER IF EXISTS sync_project_upd;
     CREATE TRIGGER sync_project_upd AFTER UPDATE OF
         name, hourly_rate, archived, archived_at, logo_data, people_count,
-        description, start_day, due_day, budget_hours ON projects
+        description, start_day, due_day, budget_hours, final_payment ON projects
     WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
         INSERT OR REPLACE INTO sync_outbox VALUES ('project', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
@@ -267,7 +267,7 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
         Entity::Project => conn
             .query_row(
                 "SELECT id, name, hourly_rate, created_at, archived, archived_at, logo_data, people_count,
-                        description, start_day, due_day, budget_hours
+                        description, start_day, due_day, budget_hours, final_payment
                  FROM projects WHERE id = ?1",
                 params![id],
                 |r| {
@@ -284,6 +284,7 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
                         "start_day": r.get::<_, Option<String>>(9)?,
                         "due_day": r.get::<_, Option<String>>(10)?,
                         "budget_hours": r.get::<_, Option<f64>>(11)?,
+                        "final_payment": r.get::<_, Option<f64>>(12)?,
                         "deleted": false,
                     }))
                 },
@@ -402,14 +403,14 @@ fn apply_project(conn: &Connection, v: &Value) -> SqlResult<bool> {
     }
     conn.execute(
         "INSERT INTO projects (id, name, hourly_rate, created_at, archived, archived_at, logo_data,
-                               people_count, description, start_day, due_day, budget_hours)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                               people_count, description, start_day, due_day, budget_hours, final_payment)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, hourly_rate = excluded.hourly_rate, created_at = excluded.created_at,
             archived = excluded.archived, archived_at = excluded.archived_at, logo_data = excluded.logo_data,
             people_count = excluded.people_count, description = excluded.description,
             start_day = excluded.start_day, due_day = excluded.due_day,
-            budget_hours = excluded.budget_hours",
+            budget_hours = excluded.budget_hours, final_payment = excluded.final_payment",
         params![
             id,
             s(v, "name").unwrap_or_default(),
@@ -423,6 +424,7 @@ fn apply_project(conn: &Connection, v: &Value) -> SqlResult<bool> {
             s(v, "start_day"),
             s(v, "due_day"),
             f(v, "budget_hours"),
+            f(v, "final_payment"),
         ],
     )?;
     Ok(true)
