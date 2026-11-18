@@ -83,6 +83,7 @@ fn main() {
             commands::delete_feature,
             commands::set_active_feature,
             commands::get_daily,
+            commands::get_session_spans,
             commands::export_csv,
             commands::open_project_window,
             commands::cloud_status,

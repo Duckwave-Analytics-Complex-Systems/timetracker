@@ -36,7 +36,7 @@ use std::sync::{Mutex, MutexGuard};
 pub use features::{Feature, FeatureInput};
 pub use phases::{Phase, PhaseInput};
 pub use projects::{PlanInput, Project};
-pub use stats::{DailyRow, DayTotal};
+pub use stats::{DailyRow, DayTotal, SessionSpan};
 pub use sync::{Entity, Member, MemberHours, Pending, RemoteTimer, TimerPush};
 pub use timer::{ClosedSession, RecoveredRun, Session};
 

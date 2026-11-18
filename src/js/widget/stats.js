@@ -1,12 +1,14 @@
 // The Today strip (Projects tab) and the Stats tab.
 import { niceScale } from '../core/charts.js';
-import { addDays, dayKey, escapeHtml, fmtDate, fmtHM, money, startOfToday } from '../core/format.js';
+import { addDays, dayKey, escapeHtml, fmtDate, fmtHM, fmtTime, money, startOfToday } from '../core/format.js';
+import { HEATMAP_RANGES, HEAT_OPACITY, LEVELS, hourHeatmap, hourLabel, level, withOpenSession } from '../core/heatmap.js';
 import { bill, liveAdditions } from '../core/model.js';
 import { colorVar, slotOf } from './colors.js';
 import { state } from './store.js';
 
 const RANGE_STORAGE_KEY = 'timetrack:stats-range';
 const SCOPE_STORAGE_KEY = 'timetrack:stats-scope';
+const HEAT_STORAGE_KEY = 'timetrack:heatmap-range';
 const GAP = 2; // px of surface between stacked segments
 const RANGES = {
   '1d': { n: 1, span: 1, label: 'today', title: 'Hours today' },
@@ -21,12 +23,15 @@ const chartWrap = $('chartWrap');
 const tipEl = $('chartTip');
 const rangeSeg = $('rangeSeg');
 const scopeSeg = $('scopeSeg');
+const heatSeg = $('heatSeg');
 
 let statsRange = localStorage.getItem(RANGE_STORAGE_KEY);
 if (!RANGES[statsRange]) statsRange = '1d';
 // 'mine' = projects that aren't shared; 'all' = everything, shared ones included.
 let statsScope = localStorage.getItem(SCOPE_STORAGE_KEY);
 if (statsScope !== 'mine' && statsScope !== 'all') statsScope = 'mine';
+let heatRange = localStorage.getItem(HEAT_STORAGE_KEY);
+if (!HEATMAP_RANGES[heatRange]) heatRange = '7d';
 let selectedKey = null; // selected chart column (null = the newest one)
 let currentBuckets = [];
 const expandedDays = new Set(); // Per day rows opened to show their projects (bucket keys)
@@ -266,6 +271,45 @@ function perDayRows(host, buckets, cfg) {
   if (focusedKey) host.querySelector(`.perday-btn[data-key="${focusedKey}"]`)?.focus();
 }
 
+/** One heatmap square: the accent colour, fainter for less time; level 0 (nothing tracked) uses the empty colour from CSS. */
+const heatCell = (lv, attrs = '') => `<i${lv ? ` style="background:var(--accent-running);opacity:${HEAT_OPACITY[lv]}"` : ''} ${attrs}></i>`;
+
+/** Active hours: when in the day time was tracked (js/core/heatmap.js). */
+function renderHeatmap(keep) {
+  const now = Date.now();
+  const running = state.projects.find((p) => p.is_running && p.run_started_at);
+  const hm = hourHeatmap(withOpenSession(state.spans, state.projects, now), heatRange, { now, keep });
+  heatSeg.querySelectorAll('button').forEach((btn) => btn.setAttribute('aria-pressed', String(btn.dataset.heat === heatRange)));
+
+  const span = (h) => `${hourLabel(h)}–${hourLabel((h + 1) % 24)}`;
+  $('heatPeak').textContent = hm.peakHour != null ? `Most active ${span(hm.peakHour)}` : '';
+  const host = $('heatHost');
+  if (!hm.total) { host.innerHTML = `<div class="meter-empty">No time tracked in the ${hm.cfg.title}.</div>`; return; }
+
+  const perDay = hm.cfg.by === 'day';
+  const cell = (row, secs, h) => {
+    const tip = `${row.label} ${span(h)} · ${secs > 0 ? fmtHM(secs) : 'nothing'}${perDay ? '' : ` in the ${hm.cfg.title}`}`;
+    return heatCell(level(secs, hm.scale), `title="${escapeHtml(tip)}"`);
+  };
+  const rows = hm.rows.map((r) =>
+    `<div class="heat-row"><span class="heat-label">${escapeHtml(r.label)}</span><div class="heat-cells">${r.cells.map((v, h) => cell(r, v, h)).join('')}</div></div>`).join('');
+  const axis = `<div class="heat-row heat-axis" aria-hidden="true"><span class="heat-label"></span><div class="heat-cells">${[0, 6, 12, 18].map((h) => `<span>${hourLabel(h).slice(0, 2)}</span>`).join('')}</div></div>`;
+  const legend = `<div class="heat-legend" aria-hidden="true">${perDay ? 'Share of each hour tracked' : 'Total per weekday and hour'}<span class="heat-scale">Less${Array.from({ length: LEVELS + 1 }, (_, i) => heatCell(i)).join('')}More</span></div>`;
+
+  // One day: list the sessions too, so the exact times are readable.
+  let list = '';
+  if (heatRange === '1d') {
+    list = '<div class="heat-sessions">' + hm.sessions.map((x) => {
+      const p = state.projects.find((q) => q.id === x.project_id);
+      const open = running && running.id === x.project_id && x.start === running.run_started_at;
+      return `<div class="perday-item"><i style="background:${colorVar(x.project_id)}"></i><span class="t">${fmtTime(x.start)} – ${open ? 'now' : fmtTime(x.end)}</span><span class="n">${escapeHtml(p?.name ?? '')}</span><span class="pct">${fmtHM((x.end - x.start) / 1000)}</span></div>`;
+    }).join('') + '</div>';
+  }
+
+  const label = `Active hours, ${hm.cfg.title}${hm.peakHour != null ? `; most active ${span(hm.peakHour)}` : ''}`;
+  host.innerHTML = `<div class="heat-grid" role="img" aria-label="${escapeHtml(label)}">${rows}${axis}</div>${legend}${list}`;
+}
+
 export function renderStats() {
   const cfg = RANGES[statsRange];
   const map = dayMap(scopeFilter());
@@ -305,6 +349,7 @@ export function renderStats() {
 
   $('perDayTitle').textContent = cfg.span === 7 ? 'Per week' : 'Per day';
   perDayRows($('perDayRows'), buckets, cfg);
+  renderHeatmap(scopeFilter());
 
   // screen-reader table view
   $('statsTable').innerHTML =
@@ -367,6 +412,14 @@ $('perDayRows').addEventListener('click', (e) => {
   if (!btn || btn.getAttribute('aria-disabled') === 'true') return;
   const key = btn.dataset.key;
   if (expandedDays.has(key)) expandedDays.delete(key); else expandedDays.add(key);
+  renderStats();
+});
+
+heatSeg.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-heat]');
+  if (!btn) return;
+  heatRange = btn.dataset.heat;
+  try { localStorage.setItem(HEAT_STORAGE_KEY, heatRange); } catch { /* ignore */ }
   renderStats();
 });
 

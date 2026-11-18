@@ -2,7 +2,8 @@
 // replaces it in one step, so a redraw never mixes fresh projects with stale
 // per-day rows (which would briefly double- or under-count today).
 import { api } from '../core/api.js';
-import { addDays, dayKey } from '../core/format.js';
+import { addDays, dayKey, startOfToday } from '../core/format.js';
+import { HEATMAP_FETCH_DAYS } from '../core/heatmap.js';
 
 export const DAILY_FETCH_DAYS = 90; // covers the longest Stats range (12 weeks)
 
@@ -10,6 +11,7 @@ export const state = {
   projects: [], // active projects
   archived: [], // filed projects
   dailyRows: [], // [{ day, project_id, seconds }] for the last DAILY_FETCH_DAYS days
+  spans: [], // your sessions [{ project_id, start_ts, end_ts }] for the last HEATMAP_FETCH_DAYS days
 };
 
 const listeners = new Set();
@@ -23,13 +25,14 @@ export function onRefresh(fn) {
 export async function refresh() {
   const request = ++latestRequest;
   const today = new Date();
-  const [projects, archived, dailyRows] = await Promise.all([
+  const [projects, archived, dailyRows, spans] = await Promise.all([
     api.projects(),
     api.archivedProjects(),
     api.daily(dayKey(addDays(today, -(DAILY_FETCH_DAYS - 1))), dayKey(today)),
+    api.sessionSpans(addDays(startOfToday(), -(HEATMAP_FETCH_DAYS - 1)).getTime(), Date.now()),
   ]);
   if (request !== latestRequest) return; // a newer refresh already landed
-  Object.assign(state, { projects, archived, dailyRows });
+  Object.assign(state, { projects, archived, dailyRows, spans });
   listeners.forEach((fn) => fn());
 }
 

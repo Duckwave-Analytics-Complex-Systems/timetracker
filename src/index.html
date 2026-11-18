@@ -178,6 +178,21 @@
           <div id="perDayRows" class="perday-rows"></div>
         </div>
 
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Active hours</h2>
+            <span id="heatPeak" class="panel-hint"></span>
+          </div>
+          <div id="heatSeg" class="seg seg-full heat-seg" role="group" aria-label="Active hours period">
+            <button data-heat="1d">1d</button>
+            <button data-heat="3d">3d</button>
+            <button data-heat="7d">7d</button>
+            <button data-heat="30d">30d</button>
+            <button data-heat="12w">12w</button>
+          </div>
+          <div id="heatHost" class="heat"></div>
+        </div>
+
         <!-- Screen-reader table view of the chart data -->
         <table id="statsTable" class="sr-only"></table>
       </div>

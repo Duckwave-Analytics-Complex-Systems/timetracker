@@ -23,7 +23,32 @@ pub struct DayTotal {
     pub seconds: i64,
 }
 
+/// One of your sessions, for the hour-of-day heatmap (js/core/heatmap.js).
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct SessionSpan {
+    pub project_id: String,
+    pub start_ts: i64,
+    pub end_ts: i64,
+}
+
 impl Db {
+    /// Your sessions (not teammates') on active projects that overlap
+    /// `from_ms..to_ms`, oldest first. The open session isn't booked yet; the
+    /// frontend adds it (`withOpenSession`).
+    pub fn session_spans(&self, from_ms: i64, to_ms: i64) -> SqlResult<Vec<SessionSpan>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT e.project_id, e.start_ts, e.end_ts
+             FROM time_entries e JOIN projects p ON p.id = e.project_id
+             WHERE p.archived = 0 AND e.user_id IS NULL AND e.end_ts > ?1 AND e.start_ts < ?2
+             ORDER BY e.start_ts ASC",
+        )?;
+        let rows = stmt.query_map(params![from_ms, to_ms], |r| {
+            Ok(SessionSpan { project_id: r.get(0)?, start_ts: r.get(1)?, end_ts: r.get(2)? })
+        })?;
+        rows.collect()
+    }
+
     /// Per-day, per-project seconds for `from_day..=to_day` across active
     /// (not archived) projects. Drives the Today strip and the Stats tab.
     pub fn daily_range(&self, from_day: &str, to_day: &str) -> SqlResult<Vec<DailyRow>> {

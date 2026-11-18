@@ -4,7 +4,7 @@
 //! `notify` the windows when data changed. JS calls these through
 //! js/core/api.js, which is the only place `invoke` names appear.
 
-use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session};
+use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session, SessionSpan};
 use crate::events::{notify, Change};
 use crate::sync::{self as cloud, SyncStatus};
 use crate::{now_ms, watchdog};
@@ -240,6 +240,13 @@ pub fn set_active_feature(app: AppHandle, db: State<Db>, project_id: String, fea
 #[tauri::command]
 pub fn get_daily(db: State<Db>, from_day: String, to_day: String) -> CmdResult<Vec<DailyRow>> {
     db.daily_range(&from_day, &to_day).map_err(msg)
+}
+
+/// Your sessions on active projects overlapping `from_ms..to_ms` (Unix ms),
+/// for the hour-of-day heatmap.
+#[tauri::command]
+pub fn get_session_spans(db: State<Db>, from_ms: i64, to_ms: i64) -> CmdResult<Vec<SessionSpan>> {
+    db.session_spans(from_ms, to_ms).map_err(msg)
 }
 
 /// One row per active project: name, total time, total bill, hourly rate.

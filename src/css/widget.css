@@ -391,6 +391,22 @@
 .perday-bill { text-align: right; font-size: 11px; color: var(--text-muted); }
 .perday-bill .bill { color: var(--accent-earnings); font-family: var(--font-mono); }
 
+/* Active hours heatmap: rows of 24 hour cells. */
+.heat-seg { margin-bottom: 10px; }
+.heat-grid { display: flex; flex-direction: column; gap: 2px; }
+.heat-row { display: flex; align-items: center; gap: 6px; }
+.heat-label { width: 52px; flex-shrink: 0; font-size: 10.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.heat-cells { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
+.heat-cells i, .heat-scale i { display: block; height: 14px; border-radius: 2px; background: var(--border-hair); }
+.heat-axis .heat-cells { grid-template-columns: repeat(4, 1fr); }
+.heat-axis span { font-size: 9.5px; color: var(--text-faint); font-family: var(--font-mono); }
+.heat-legend { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 10.5px; color: var(--text-faint); }
+.heat-scale { display: flex; align-items: center; gap: 3px; }
+.heat-scale i { width: 10px; height: 10px; }
+.heat-sessions { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-hair); }
+.heat-sessions .t { color: var(--text-muted); white-space: nowrap; }
+.heat-sessions .n { color: var(--text-primary); }
+
 @media (prefers-reduced-motion: reduce) {
   .project-card.running .ring-wrap { animation: none; }
 }

@@ -408,6 +408,33 @@ fn range_query_reset_and_cascade() {
 }
 
 #[test]
+fn session_spans_are_yours_on_active_projects_in_range() {
+    let db = fresh("spans");
+    db.create_project("a", "A", 0.0, 1, 0).unwrap();
+    db.create_project("b", "B", 0.0, 1, 1).unwrap();
+    {
+        let conn = db.conn();
+        for (id, p, start, end, user) in [
+            ("e1", "a", 1_000, 2_000, None),         // before the range
+            ("e2", "a", 4_000, 6_000, None),         // overlaps its start
+            ("e3", "a", 7_000, 8_000, Some("bob")),  // a teammate's
+            ("e4", "b", 9_000, 12_000, None),        // overlaps its end
+            ("e5", "b", 20_000, 21_000, None),       // after
+        ] {
+            conn.execute(
+                "INSERT INTO time_entries (id, project_id, start_ts, end_ts, seconds, user_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, p, start, end, (end - start) / 1000, user],
+            )
+            .unwrap();
+        }
+    }
+    let ids = |v: Vec<SessionSpan>| v.into_iter().map(|s| (s.project_id, s.start_ts)).collect::<Vec<_>>();
+    assert_eq!(ids(db.session_spans(5_000, 10_000).unwrap()), vec![("a".into(), 4_000), ("b".into(), 9_000)]);
+    db.set_archived("b", true, 30_000).unwrap();
+    assert_eq!(ids(db.session_spans(5_000, 10_000).unwrap()), vec![("a".into(), 4_000)]);
+}
+
+#[test]
 fn upgrade_from_v3_backfills_history_exactly_once() {
     let dir = temp_dir("bf");
     std::fs::create_dir_all(&dir).unwrap();

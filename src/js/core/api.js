@@ -43,6 +43,8 @@ export const api = {
 
   // ---- stats & export
   daily: (fromDay, toDay) => invoke('get_daily', { fromDay, toDay }),
+  /** Your sessions overlapping fromMs..toMs: [{ project_id, start_ts, end_ts }] */
+  sessionSpans: (fromMs, toMs) => invoke('get_session_spans', { fromMs, toMs }),
   exportCsv: () => invoke('export_csv'),
 
   // ---- cloud sync (src-tauri/src/sync.rs). These four return
