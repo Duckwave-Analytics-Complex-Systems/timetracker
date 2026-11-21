@@ -143,44 +143,55 @@ export function computeMetrics({ project, phases, features, daily, totalSeconds 
   const featureUnassignedH = Math.max(0, spentH - sum(features, (f) => f.spent_seconds) / 3600);
 
   // ---- health + the reasons behind it
-  const notes = []; // { tone: 'ok' | 'warn' | 'bad', text }
+  // `code` and `args` (raw numbers, dates and names) let the Android app write
+  // the same note in another language; `text` is the English one.
+  const notes = []; // { tone: 'ok' | 'warn' | 'bad', text, code, args }
+  const note = (tone, code, args, text) => notes.push({ tone, code, args, text });
   let health;
   if (completion != null && completion >= 0.999) {
     health = 'done';
-    notes.push({ tone: 'ok', text: `All phases are complete, using ${fmtHours(spentH)}${budgetH ? ` of ${fmtHours(budgetH)} budgeted` : ''}.` });
+    note('ok', budgetH ? 'complete_budget' : 'complete', { spentH, budgetH },
+      `All phases are complete, using ${fmtHours(spentH)}${budgetH ? ` of ${fmtHours(budgetH)} budgeted` : ''}.`);
   } else if (!hasPhases && !budgetH && !due) {
     health = 'unplanned';
-    notes.push({ tone: 'warn', text: 'Add dates, a budget or phases in the Schedule tab to measure progress.' });
+    note('warn', 'unplanned', {}, 'Add dates, a budget or phases in the Schedule tab to measure progress.');
   } else if (start && today < start && spentH < 0.01) {
     health = 'upcoming';
-    notes.push({ tone: 'ok', text: `Starts ${fmtDate(start)}.` });
+    note('ok', 'starts', { start }, `Starts ${fmtDate(start)}.`);
   } else {
     let level = 0; // 0 on track, 1 at risk, 2 behind
-    const flag = (lvl, text) => {
+    const flag = (lvl, code, args, text) => {
       level = Math.max(level, lvl);
-      notes.push({ tone: lvl === 2 ? 'bad' : 'warn', text });
+      note(lvl === 2 ? 'bad' : 'warn', code, args, text);
     };
-    if (daysLeft != null && daysLeft < 0) flag(2, `The due date passed ${plural(-daysLeft, 'day')} ago.`);
+    if (daysLeft != null && daysLeft < 0) flag(2, 'due_passed', { days: -daysLeft }, `The due date passed ${plural(-daysLeft, 'day')} ago.`);
     if (completion != null && planned != null) {
       const gap = completion - planned;
-      if (gap < -0.15) flag(2, `Work done (${pct(completion)}) is well behind the plan (${pct(planned)} expected by today).`);
-      else if (gap < -0.05) flag(1, `Work done (${pct(completion)}) is slightly behind the plan (${pct(planned)} expected by today).`);
-      else if (gap > 0.05) notes.push({ tone: 'ok', text: `Ahead of plan: ${pct(completion)} done, ${pct(planned)} expected by today.` });
-      else notes.push({ tone: 'ok', text: `Progress (${pct(completion)}) matches the plan (${pct(planned)} expected by today).` });
+      const args = { completion, planned };
+      if (gap < -0.15) flag(2, 'well_behind', args, `Work done (${pct(completion)}) is well behind the plan (${pct(planned)} expected by today).`);
+      else if (gap < -0.05) flag(1, 'slightly_behind', args, `Work done (${pct(completion)}) is slightly behind the plan (${pct(planned)} expected by today).`);
+      else if (gap > 0.05) note('ok', 'ahead', args, `Ahead of plan: ${pct(completion)} done, ${pct(planned)} expected by today.`);
+      else note('ok', 'on_plan', args, `Progress (${pct(completion)}) matches the plan (${pct(planned)} expected by today).`);
     }
     if (budgetUsed != null) {
-      if (budgetUsed > 1) flag(2, `Over budget: ${fmtHours(spentH)} spent of ${fmtHours(budgetH)} (${pct(budgetUsed)}).`);
-      else if (efficiency != null && efficiency < 0.8) flag(1, `Hours are running ahead of progress: ${pct(budgetUsed)} of the budget spent for ${pct(completion)} of the work.`);
-      else if (efficiency == null && timelineElapsed != null && budgetUsed > timelineElapsed + 0.15) flag(1, `${pct(budgetUsed)} of the budget spent with ${pct(timelineElapsed)} of the timeline elapsed.`);
-      else if (efficiency != null && efficiency >= 1.05) notes.push({ tone: 'ok', text: `Efficient: progress is costing fewer hours than planned (${efficiency.toFixed(2)}× earned per hour spent).` });
+      if (budgetUsed > 1) flag(2, 'over_budget', { spentH, budgetH, budgetUsed }, `Over budget: ${fmtHours(spentH)} spent of ${fmtHours(budgetH)} (${pct(budgetUsed)}).`);
+      else if (efficiency != null && efficiency < 0.8) flag(1, 'hours_ahead', { budgetUsed, completion }, `Hours are running ahead of progress: ${pct(budgetUsed)} of the budget spent for ${pct(completion)} of the work.`);
+      else if (efficiency == null && timelineElapsed != null && budgetUsed > timelineElapsed + 0.15) flag(1, 'budget_vs_time', { budgetUsed, timelineElapsed }, `${pct(budgetUsed)} of the budget spent with ${pct(timelineElapsed)} of the timeline elapsed.`);
+      else if (efficiency != null && efficiency >= 1.05) note('ok', 'efficient', { efficiency }, `Efficient: progress is costing fewer hours than planned (${efficiency.toFixed(2)}× earned per hour spent).`);
     }
     if (forecastFinish && due && daysLeft >= 0 && forecastFinish > due) {
-      flag(1, `At the recent pace (${fmtHours(weeklyPace)}/week) the remaining work would end around ${fmtDate(forecastFinish)}, after the due date.`);
+      flag(1, 'late_forecast', { weeklyPace, forecastFinish }, `At the recent pace (${fmtHours(weeklyPace)}/week) the remaining work would end around ${fmtDate(forecastFinish)}, after the due date.`);
     }
     const overdue = phaseRows.filter((r) => r.status === 'overdue');
-    if (overdue.length) flag(1, `${plural(overdue.length, 'item')} past their date and not finished: ${overdue.map((r) => r.name).join(', ')}.`);
+    if (overdue.length) {
+      const names = overdue.map((r) => r.name);
+      flag(1, 'overdue_items', { count: names.length, names }, `${plural(overdue.length, 'item')} past their date and not finished: ${names.join(', ')}.`);
+    }
     const overPhases = phaseRows.filter((r) => r.overBudget && r.status !== 'done');
-    if (overPhases.length) flag(1, `Over their hour estimate: ${overPhases.map((r) => r.name).join(', ')}.`);
+    if (overPhases.length) {
+      const names = overPhases.map((r) => r.name);
+      flag(1, 'over_estimate', { names }, `Over their hour estimate: ${names.join(', ')}.`);
+    }
     health = ['ok', 'risk', 'behind'][level];
   }
 
