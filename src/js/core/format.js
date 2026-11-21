@@ -1,6 +1,14 @@
 // Formatting and local-date helpers. Pure functions, no DOM, so the report
 // builder can use them too.
 
+// The locale for dates, times and money. undefined = the system's (the
+// desktop never sets it); the Android app sets it to the app's language.
+let LOCALE;
+
+export function setFormatLocale(locale) {
+  LOCALE = locale || undefined;
+}
+
 export function pad2(n) {
   return String(n).padStart(2, '0');
 }
@@ -32,7 +40,7 @@ export function fmtHours(hours, { sign = false } = {}) {
 
 export function money(amount) {
   if (amount == null || !Number.isFinite(amount)) return '—';
-  return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `$${amount.toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** 0.456 -> "46%" (null -> "—") */
@@ -72,9 +80,9 @@ export function startOfToday() {
   return new Date(n.getFullYear(), n.getMonth(), n.getDate());
 }
 
-/** Monday on or before `d`. */
-export function startOfWeek(d) {
-  return addDays(d, -((d.getDay() + 6) % 7));
+/** The first day of `d`'s week: Monday by default, Sunday with weekStart = 0. */
+export function startOfWeek(d, weekStart = 1) {
+  return addDays(d, -((d.getDay() - weekStart + 7) % 7));
 }
 
 /** Whole calendar days from a to b (DST-safe). */
@@ -83,7 +91,7 @@ export function daysBetween(a, b) {
 }
 
 export function fmtDate(d, opts = { month: 'short', day: 'numeric', year: 'numeric' }) {
-  return d ? d.toLocaleDateString(undefined, opts) : '—';
+  return d ? d.toLocaleDateString(LOCALE, opts) : '—';
 }
 
 /** "2026-10-12" -> "Oct 12" (or with year when asked) */
@@ -93,5 +101,5 @@ export function fmtDay(key, withYear = false) {
 }
 
 export function fmtTime(ms) {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return new Date(ms).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
 }
