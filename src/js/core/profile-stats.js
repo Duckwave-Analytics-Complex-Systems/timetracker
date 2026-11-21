@@ -166,3 +166,38 @@ export function daysSince(firstDay, today = new Date()) {
   const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   return Math.round((t - d) / DAY_MS) + 1;
 }
+
+/**
+ * One calendar year of your sessions (the year so far for the current one):
+ * { year, totalSeconds, byMonth: seconds[12], busiestMonth (0..11 or null),
+ *   byProject: Map(id -> seconds), topProject: { id, seconds } | null,
+ *   activeDays, longestStreak, longestSession, days: Map(dayKey -> seconds) }.
+ * Sessions crossing New Year count on each side.
+ */
+export function yearSummary(sessions, year, { workDays = 0b0011111, today = new Date() } = {}) {
+  const from = new Date(year, 0, 1).getTime();
+  const to = new Date(year + 1, 0, 1).getTime();
+  const inYear = sessions
+    .map((s) => ({ ...s, start_ts: Math.max(s.start_ts, from), end_ts: Math.min(s.end_ts, to) }))
+    .filter((s) => s.end_ts > s.start_ts);
+  const totals = lifetimeTotals(inYear);
+  const byMonth = new Array(12).fill(0);
+  for (const [key, secs] of totals.days) byMonth[Number(key.slice(5, 7)) - 1] += secs;
+  let busiestMonth = null;
+  byMonth.forEach((v, i) => { if (v > 0 && (busiestMonth === null || v > byMonth[busiestMonth])) busiestMonth = i; });
+  let topProject = null;
+  for (const [id, secs] of totals.byProject) if (!topProject || secs > topProject.seconds) topProject = { id, seconds: secs };
+  const end = today < new Date(year + 1, 0, 1) ? today : new Date(year, 11, 31);
+  return {
+    year,
+    totalSeconds: totals.totalSeconds,
+    byMonth,
+    busiestMonth,
+    byProject: totals.byProject,
+    topProject,
+    activeDays: totals.activeDays,
+    longestStreak: totals.activeDays ? streaks(totals.days, { workDays, today: end }).longest : 0,
+    longestSession: totals.longestSession,
+    days: totals.days,
+  };
+}
