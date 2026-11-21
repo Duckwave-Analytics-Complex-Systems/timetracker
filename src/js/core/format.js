@@ -4,9 +4,29 @@
 // The locale for dates, times and money. undefined = the system's (the
 // desktop never sets it); the Android app sets it to the app's language.
 let LOCALE;
+// The currency for money(): undefined = "$" + number, as the desktop has
+// always shown it; the Android app sets the profile's ISO code (e.g. "EUR").
+let CURRENCY;
+// The first day of the week for startOfWeek(): 1 = Monday, 0 = Sunday.
+let WEEK_START = 1;
+let moneyFmt = null; // cached Intl.NumberFormat for LOCALE + CURRENCY
 
 export function setFormatLocale(locale) {
   LOCALE = locale || undefined;
+  moneyFmt = null;
+}
+
+export function setFormatCurrency(code) {
+  CURRENCY = /^[A-Z]{3}$/.test(code || '') ? code : undefined;
+  moneyFmt = null;
+}
+
+export function setWeekStart(day) {
+  WEEK_START = day === 0 ? 0 : 1;
+}
+
+export function weekStart() {
+  return WEEK_START;
 }
 
 export function pad2(n) {
@@ -40,7 +60,21 @@ export function fmtHours(hours, { sign = false } = {}) {
 
 export function money(amount) {
   if (amount == null || !Number.isFinite(amount)) return '—';
+  if (CURRENCY) {
+    if (!moneyFmt) moneyFmt = currencyFormat();
+    if (moneyFmt) return moneyFmt.format(amount);
+  }
   return `$${amount.toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** "$" rather than "US$" or "MX$" where the engine supports it; false if the code is unknown. */
+function currencyFormat() {
+  for (const currencyDisplay of ['narrowSymbol', 'symbol']) {
+    try {
+      return new Intl.NumberFormat(LOCALE, { style: 'currency', currency: CURRENCY, currencyDisplay });
+    } catch { /* try the next one */ }
+  }
+  return false;
 }
 
 /** 0.456 -> "46%" (null -> "—") */
@@ -80,9 +114,9 @@ export function startOfToday() {
   return new Date(n.getFullYear(), n.getMonth(), n.getDate());
 }
 
-/** The first day of `d`'s week: Monday by default, Sunday with weekStart = 0. */
-export function startOfWeek(d, weekStart = 1) {
-  return addDays(d, -((d.getDay() - weekStart + 7) % 7));
+/** The first day of `d`'s week: Monday unless setWeekStart(0) chose Sunday. */
+export function startOfWeek(d, first = WEEK_START) {
+  return addDays(d, -((d.getDay() - first + 7) % 7));
 }
 
 /** Whole calendar days from a to b (DST-safe). */
