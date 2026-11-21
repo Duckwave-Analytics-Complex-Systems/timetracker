@@ -236,6 +236,25 @@ alter table public.profiles add column if not exists updated_at timestamptz not 
 -- apps show it under "Former members".
 alter table public.time_entries drop constraint if exists time_entries_user_id_fkey;
 
+-- Profile v2 (Android 2.4). The desktop reads only display_name and share_code.
+alter table public.profiles add column if not exists avatar_kind text not null default 'initials';
+alter table public.profiles add column if not exists avatar_preset text;     -- '01', '02', ... (bundled image)
+alter table public.profiles add column if not exists avatar_color integer;   -- palette slot 0..7, for initials
+alter table public.profiles add column if not exists avatar_data text;       -- photo: small JPEG data: URL
+alter table public.profiles add column if not exists currency text not null default 'USD';
+alter table public.profiles add column if not exists week_start integer not null default 1;  -- 1 = Monday, 0 = Sunday
+alter table public.profiles add column if not exists weekly_goal_hours double precision;
+alter table public.profiles add column if not exists work_days integer not null default 31;  -- bit 0 = Monday .. bit 6 = Sunday
+alter table public.profiles add column if not exists work_start text not null default '09:00';
+alter table public.profiles add column if not exists work_end text not null default '18:00';
+alter table public.profiles add column if not exists default_rate double precision;
+alter table public.profiles add column if not exists updated_at timestamptz not null default clock_timestamp();
+
+-- Time someone tracked stays on a shared project after they delete their
+-- account (see delete_my_account), so it must not go with their user row. The
+-- apps show it under "Former members".
+alter table public.time_entries drop constraint if exists time_entries_user_id_fkey;
+
 create index if not exists project_members_user       on public.project_members (user_id);
 create index if not exists org_members_user           on public.org_members (user_id);
 create index if not exists projects_org               on public.projects (org_id);
