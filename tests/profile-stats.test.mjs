@@ -106,3 +106,26 @@ test('daysSince counts today', () => {
   assert.equal(daysSince('2026-11-01', new Date(2026, 10, 18)), 18);
   assert.equal(daysSince(null), 0);
 });
+
+test('yearSummary clips to the year and finds the top project and month', async () => {
+  const { yearSummary } = await import('../src/js/core/profile-stats.js');
+  const y = yearSummary([
+    span(at(2025, 12, 31, 23), 2, 'a'), // 1 h in 2025, 1 h in 2026
+    span(at(2026, 3, 2, 9), 3, 'b'), // Mon
+    span(at(2026, 3, 3, 9), 4, 'b'), // Tue
+    span(at(2026, 7, 1, 9), 1, 'a'),
+    span(at(2027, 1, 1, 9), 5, 'c'), // next year: ignored
+  ], 2026, { today: new Date(2026, 10, 20) });
+  assert.equal(y.totalSeconds, 9 * 3600);
+  assert.equal(y.byMonth[0], 3600);
+  assert.equal(y.byMonth[2], 7 * 3600);
+  assert.equal(y.busiestMonth, 2);
+  assert.deepEqual(y.topProject, { id: 'b', seconds: 7 * 3600 });
+  assert.equal(y.activeDays, 4);
+  assert.equal(y.longestStreak, 2);
+  assert.equal(y.longestSession, 4 * 3600);
+  const empty = yearSummary([], 2026);
+  assert.equal(empty.busiestMonth, null);
+  assert.equal(empty.topProject, null);
+  assert.equal(empty.longestStreak, 0);
+});
