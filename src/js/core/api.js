@@ -64,6 +64,8 @@ export const api = {
   // ---- sharing
   /** Resolves to the added person's name. */
   addMember: (projectId, shareCode) => invoke('cloud_add_member', { projectId, shareCode }),
+  /** Adds someone picked from the project's organization. Resolves to their name. */
+  addMemberById: (projectId, userId) => invoke('cloud_add_member_by_id', { projectId, userId }),
   /** Removing yourself is leaving the project. */
   removeMember: (projectId, userId) => invoke('cloud_remove_member', { projectId, userId }),
 

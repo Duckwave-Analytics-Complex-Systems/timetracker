@@ -633,6 +633,16 @@ pub fn add_member(app: &AppHandle, project_id: &str, share_code: &str) -> SyncRe
     Ok(name.as_str().unwrap_or_default().to_string())
 }
 
+/// Adds someone from the project's organization (picked from its people). Returns their name.
+pub fn add_member_by_id(app: &AppHandle, project_id: &str, user_id: &str) -> SyncResult<String> {
+    run_cycle(app); // the server must have the project first
+    let name = as_signed_in(app, |_, rest| {
+        rest.rpc("add_member_by_id", json!({ "p_project_id": project_id, "p_user_id": user_id }))
+    })?;
+    run_cycle(app);
+    Ok(name.as_str().unwrap_or_default().to_string())
+}
+
 pub fn remove_member(app: &AppHandle, project_id: &str, user_id: &str) -> SyncResult<()> {
     as_signed_in(app, |_, rest| {
         rest.rpc("remove_member", json!({ "p_project_id": project_id, "p_user_id": user_id }))

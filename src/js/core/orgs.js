@@ -39,3 +39,23 @@ export function defaultRate(id, orgs, personalRate) {
   const org = orgs.find((o) => o.id === id);
   return org?.default_rate ?? personalRate ?? null;
 }
+
+/**
+ * The people of an organization who can still be added to one of its
+ * projects: everyone not already in it. `orgMembers`: [{ user_id, ... }] of
+ * the project's organization; `projectMembers`: [{ user_id }] of the project.
+ * Sorted by name.
+ */
+export function addableMembers(orgMembers, projectMembers) {
+  const inIt = new Set(projectMembers.map((m) => m.user_id));
+  return orgMembers
+    .filter((m) => !inIt.has(m.user_id))
+    .sort((a, b) => String(a.display_name).localeCompare(String(b.display_name), undefined, { sensitivity: 'base' }));
+}
+
+/**
+ * Who may change a project's members, mirroring can_manage_project() on the
+ * server: its owner, or an owner or admin of its organization. Both show up
+ * locally as `is_owner` (an admin who isn't in the project reads as its owner).
+ */
+export const canManageMembers = (project) => !!project?.is_owner;

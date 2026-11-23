@@ -47,3 +47,23 @@ test('defaultRate', () => {
   assert.equal(defaultRate(PERSONAL, orgs, 25), 25);
   assert.equal(defaultRate(PERSONAL, orgs, undefined), null);
 });
+
+test('addableMembers', async () => {
+  const { addableMembers } = await import('../src/js/core/orgs.js');
+  const org = [
+    { user_id: 'a', display_name: 'Pepe' },
+    { user_id: 'b', display_name: 'ana' },
+    { user_id: 'c', display_name: 'Bren' },
+  ];
+  assert.deepEqual(addableMembers(org, [{ user_id: 'a' }]).map((m) => m.user_id), ['b', 'c'], 'by name, case aside');
+  assert.deepEqual(addableMembers(org, org), []);
+  assert.deepEqual(addableMembers([], [{ user_id: 'a' }]), []);
+});
+
+test('canManageMembers', async () => {
+  const { canManageMembers } = await import('../src/js/core/orgs.js');
+  assert.equal(canManageMembers({ is_owner: true }), true);
+  assert.equal(canManageMembers({ is_owner: true, managed_only: true }), true, 'org admin');
+  assert.equal(canManageMembers({ is_owner: false }), false);
+  assert.equal(canManageMembers(null), false);
+});

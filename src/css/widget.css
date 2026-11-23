@@ -515,3 +515,5 @@
   flex: 1; min-width: 0; background: var(--bg-void); border: 1px solid var(--border-hair); border-radius: 8px;
   padding: 7px 10px; color: var(--text-primary); font-size: 13px; font-family: var(--font-body);
 }
+.org-logo-preview { display: inline-flex; align-items: center; font-size: 12px; }
+.org-logo-preview .muted { color: var(--text-faint); }

@@ -94,6 +94,7 @@ fn main() {
             commands::cloud_sync_now,
             commands::cloud_set_display_name,
             commands::cloud_add_member,
+            commands::cloud_add_member_by_id,
             commands::cloud_remove_member,
             commands::set_project_org,
             commands::get_orgs,

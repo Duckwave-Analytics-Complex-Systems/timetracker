@@ -350,6 +350,22 @@
         <span>Name</span>
         <input id="orgName" type="text" maxlength="60" autocomplete="off" />
       </label>
+      <label class="field hidden" id="orgRateField">
+        <span>Default hourly rate</span>
+        <input id="orgRate" type="number" min="0" step="0.01" placeholder="0.00" />
+      </label>
+      <p class="field-hint hidden" id="orgRateHint">New projects in this organization start with it. Empty: each person's own.</p>
+      <div class="field hidden" id="orgLogoField">
+        <span>Logo</span>
+        <div class="share-code">
+          <span id="orgLogoPreview" class="org-logo-preview"></span>
+          <span class="org-code-actions">
+            <button type="button" id="orgLogoBtn" class="btn-secondary">Change</button>
+            <button type="button" id="orgLogoRemove" class="btn-secondary">Remove</button>
+          </span>
+        </div>
+        <input type="file" id="orgLogoInput" accept="image/*" class="hidden" />
+      </div>
       <div class="field hidden" id="orgCodeField">
         <span>Invite code</span>
         <div class="share-code"><code id="orgCode"></code>

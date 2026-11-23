@@ -6,6 +6,7 @@
 import { api } from '../core/api.js';
 import { escapeHtml } from '../core/format.js';
 import { PERSONAL, defaultRate, inWorkspace, isOrgAdmin, moveTargets } from '../core/orgs.js';
+import { resizeImageToDataUrl } from './image.js';
 import { refresh, setWorkspace, state } from './store.js';
 
 const $ = (id) => document.getElementById(id);
@@ -197,8 +198,12 @@ async function renderOrgDialog() {
   $('orgBadge').innerHTML = badge(org);
   $('orgTitle').textContent = org.name;
   $('orgSub').textContent = `${ROLE[org.role]} · ${people(members.length)}`;
-  $('orgNameField').classList.toggle('hidden', !admin);
+  for (const id of ['orgNameField', 'orgRateField', 'orgRateHint', 'orgLogoField']) $(id).classList.toggle('hidden', !admin);
   if (admin && document.activeElement !== $('orgName')) $('orgName').value = org.name;
+  if (admin && document.activeElement !== $('orgRate')) $('orgRate').value = org.default_rate > 0 ? org.default_rate : '';
+  $('orgLogoPreview').innerHTML = org.logo_data ? badge(org) : '<span class="muted">None</span>';
+  $('orgLogoBtn').textContent = org.logo_data ? 'Change' : 'Add';
+  $('orgLogoRemove').classList.toggle('hidden', !org.logo_data);
   const showCode = admin && !!org.join_code;
   $('orgCodeField').classList.toggle('hidden', !showCode);
   $('orgCodeHint').classList.toggle('hidden', !showCode);
@@ -234,6 +239,29 @@ $('orgName').addEventListener('change', async () => {
   const name = $('orgName').value.trim();
   if (!name) return renderOrgDialog();
   if (await orgAction(() => api.updateOrg(openOrgId, { name }))) renderOrgDialog();
+});
+$('orgRate').addEventListener('change', async () => {
+  const v = parseFloat($('orgRate').value);
+  const rate = Number.isFinite(v) && v > 0 ? v : null;
+  if (await orgAction(() => api.updateOrg(openOrgId, { default_rate: rate }))) renderOrgDialog();
+});
+$('orgLogoBtn').addEventListener('click', () => {
+  $('orgLogoInput').value = '';
+  $('orgLogoInput').click();
+});
+$('orgLogoInput').addEventListener('change', async () => {
+  const file = $('orgLogoInput').files[0];
+  if (!file) return;
+  try {
+    // 128 px, like project logos: well under the server's 60 KB limit.
+    const data = await resizeImageToDataUrl(file, 128);
+    if (await orgAction(() => api.updateOrg(openOrgId, { logo_data: data }))) renderOrgDialog();
+  } catch (err) {
+    note(String(err));
+  }
+});
+$('orgLogoRemove').addEventListener('click', async () => {
+  if (await orgAction(() => api.updateOrg(openOrgId, { logo_data: null }))) renderOrgDialog();
 });
 $('orgCopyCode').addEventListener('click', async (e) => {
   try {

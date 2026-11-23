@@ -348,6 +348,12 @@ pub async fn cloud_add_member(app: AppHandle, project_id: String, share_code: St
     tauri::async_runtime::spawn_blocking(move || cloud::add_member(&app, &project_id, &share_code)).await.map_err(msg)?
 }
 
+/// Adds someone from the project's organization. Returns their name.
+#[tauri::command]
+pub async fn cloud_add_member_by_id(app: AppHandle, project_id: String, user_id: String) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || cloud::add_member_by_id(&app, &project_id, &user_id)).await.map_err(msg)?
+}
+
 /// Removes someone from a project. Removing yourself is leaving it.
 #[tauri::command]
 pub async fn cloud_remove_member(app: AppHandle, project_id: String, user_id: String) -> CmdResult<()> {

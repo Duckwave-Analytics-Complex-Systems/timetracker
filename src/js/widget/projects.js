@@ -7,6 +7,7 @@ import { PERSONAL, inWorkspace } from '../core/orgs.js';
 import { toggleTimer } from '../core/session-notes.js';
 import { openEndDialog } from './end-project.js';
 import { applyWorkspaceChange, chosenOrg, fillProjectWorkspace, startingRate, workspaceName } from './orgs.js';
+import { resizeImageToDataUrl } from './image.js';
 import { state, act } from './store.js';
 
 const SORT_STORAGE_KEY = 'timetrack:sort';
@@ -257,26 +258,3 @@ logoInput.addEventListener('change', async () => {
     console.error('logo upload failed', err);
   }
 });
-
-function resizeImageToDataUrl(file, maxSize) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('invalid image'));
-      img.onload = () => {
-        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale));
-        const h = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
