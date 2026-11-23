@@ -44,7 +44,8 @@ export async function renderOrgStats() {
   if (presence.orgId !== org.id || Date.now() - presence.at > PRESENCE_EVERY_MS) await loadPresence(org.id);
 
   const now = Date.now();
-  const range = periodRange(period, now);
+  // The organization's week, if it set one (else yours).
+  const range = periodRange(period, now, org.week_start);
   const [entries, people] = await Promise.all([api.orgEntries(org.id, range.from), api.orgMembers(org.id)]);
   if (request !== drawing) return; // a newer draw is on its way
   const me = people.find((m) => m.is_me)?.user_id ?? null;

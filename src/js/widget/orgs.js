@@ -198,10 +198,11 @@ async function renderOrgDialog() {
   $('orgBadge').innerHTML = badge(org);
   $('orgTitle').textContent = org.name;
   $('orgSub').textContent = `${ROLE[org.role]} · ${people(members.length)}`;
-  for (const id of ['orgNameField', 'orgRateField', 'orgRateHint', 'orgCurrencyField', 'orgCurrencyHint', 'orgLogoField']) {
+  for (const id of ['orgNameField', 'orgRateField', 'orgRateHint', 'orgCurrencyField', 'orgCurrencyHint', 'orgWeekField', 'orgWeekHint', 'orgLogoField']) {
     $(id).classList.toggle('hidden', !admin);
   }
   if (admin && document.activeElement !== $('orgCurrency')) $('orgCurrency').value = org.currency || '';
+  if (admin) $('orgWeek').value = org.week_start == null ? '' : String(org.week_start);
   if (admin && document.activeElement !== $('orgName')) $('orgName').value = org.name;
   if (admin && document.activeElement !== $('orgRate')) $('orgRate').value = org.default_rate > 0 ? org.default_rate : '';
   $('orgLogoPreview').innerHTML = org.logo_data ? badge(org) : '<span class="muted">None</span>';
@@ -257,6 +258,10 @@ $('orgCurrency').addEventListener('change', async () => {
     return;
   }
   if (await orgAction(() => api.updateOrg(openOrgId, { currency: code || null }))) renderOrgDialog();
+});
+$('orgWeek').addEventListener('change', async () => {
+  const v = $('orgWeek').value;
+  if (await orgAction(() => api.updateOrg(openOrgId, { week_start: v === '' ? null : Number(v) }))) renderOrgDialog();
 });
 $('orgLogoBtn').addEventListener('click', () => {
   $('orgLogoInput').value = '';

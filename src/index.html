@@ -364,6 +364,15 @@
         <input id="orgCurrency" type="text" maxlength="3" autocomplete="off" spellcheck="false" placeholder="Each person's own" />
       </label>
       <p class="field-hint hidden" id="orgCurrencyHint">Its projects bill in it, for everyone. Empty: each person sees their own currency.</p>
+      <label class="field hidden" id="orgWeekField">
+        <span>Week starts on</span>
+        <select id="orgWeek">
+          <option value="">Each person's</option>
+          <option value="1">Monday</option>
+          <option value="0">Sunday</option>
+        </select>
+      </label>
+      <p class="field-hint hidden" id="orgWeekHint">The dashboard's week and weekly goals follow it. Everyone's own Stats keep their own.</p>
       <div class="field hidden" id="orgLogoField">
         <span>Logo</span>
         <div class="share-code">

@@ -12,7 +12,8 @@ import { bill } from './model.js';
 /**
  * A period ending now: 'week' (this week so far), 'month' (this month so far)
  * or 'lastMonth' (all of last month). { from, to } in unix ms, and `weeks`,
- * its length in weeks (for goals, which are weekly).
+ * its length in weeks (for goals, which are weekly). `firstDay`: the week's
+ * first day (1 = Monday, 0 = Sunday), e.g. the organization's; null = yours.
  */
 export function periodRange(kind, now = Date.now(), firstDay) {
   const today = new Date(now);

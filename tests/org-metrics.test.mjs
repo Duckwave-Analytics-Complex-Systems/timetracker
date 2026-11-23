@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { setWeekStart } from '../src/js/core/format.js';
 import { orgReportCsv, orgSummary, periodRange } from '../src/js/core/org-metrics.js';
 
 const H = 3600;
@@ -119,4 +120,13 @@ test('orgReportCsv', () => {
   assert.ok(lines.includes('Pepe,Website,1.50,75.00'));
   assert.ok(lines.includes('Former member,Brand,1.00,'));
   assert.equal(lines.at(-1), 'Total,,2.50,75.00');
+});
+
+test("periodRange: no organization week start means yours", () => {
+  const now = day(2026, 11, 25, 10); // a Wednesday
+  setWeekStart(0);
+  assert.equal(periodRange('week', now, null).from, day(2026, 11, 22), 'yours: Sunday');
+  assert.equal(periodRange('week', now, undefined).from, day(2026, 11, 22));
+  assert.equal(periodRange('week', now, 1).from, day(2026, 11, 23), "the organization's Monday wins");
+  setWeekStart(1);
 });
