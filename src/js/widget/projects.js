@@ -5,10 +5,12 @@ import { escapeHtml, fmtHMS } from '../core/format.js';
 import { moneyOf } from '../core/money.js';
 import { bill, billedPeople, liveSeconds } from '../core/model.js';
 import { PERSONAL, inWorkspace } from '../core/orgs.js';
+import { isSharedRun } from '../core/sessions.js';
 import { toggleTimer } from '../core/session-notes.js';
 import { openEndDialog } from './end-project.js';
 import { applyWorkspaceChange, chosenOrg, fillProjectWorkspace, startingRate, workspaceName } from './orgs.js';
 import { resizeImageToDataUrl } from './image.js';
+import { openSessionPicker, sessionAction, sessionLine } from './sessions.js';
 import { state, act } from './store.js';
 
 const SORT_STORAGE_KEY = 'timetrack:sort';
@@ -75,9 +77,10 @@ function cardHtml(p, seconds) {
         <div class="card-name">${escapeHtml(p.name)}</div>
         ${phase}
         ${feature}
+        ${p.is_running && sessionLine(p.id) ? `<div class="card-with">${escapeHtml(sessionLine(p.id))}</div>` : ''}
         <div class="card-sub">
           <span class="status-dot"></span>
-          <span>${p.is_running ? (p.run_device ? 'Running on phone' : 'Running') : 'Paused'}</span>
+          <span>${p.is_running ? (isSharedRun(p) ? 'Shared session' : p.run_device ? 'Running on phone' : 'Running') : 'Paused'}</span>
           ${p.hourly_rate ? `<span>·</span><span class="earnings">${moneyOf(p, bill(p, seconds))}</span>` : ''}
           ${billedPeople(p) > 1 ? `<span>·</span><span class="people-badge">×${billedPeople(p)}</span>` : ''}
           ${p.shared ? '<span>·</span><span class="people-badge">Shared</span>' : ''}
@@ -146,6 +149,7 @@ const MENU_ACTIONS = {
     if (confirm(question)) act(() => api.resetProject(p.id));
   },
   end: (p) => openEndDialog(p),
+  session: (p) => openSessionPicker(p).catch((err) => alert(String(err))),
   delete: (p) => {
     const everyone = p.shared ? ` for everyone on it, including their tracked time` : '';
     if (confirm(`Delete "${p.name}"? This removes its tracked time and schedule permanently${everyone}.`)) act(() => api.deleteProject(p.id));
@@ -188,8 +192,10 @@ document.addEventListener('click', () => menuEl.classList.add('hidden'));
 function openCardMenu(evt, p) {
   evt.stopPropagation();
   // Someone else's project: leaving it is in its Team tab.
+  const shared = sessionAction(p);
   const items = p.is_owner ? [
     { action: 'open', label: 'Open project' },
+    ...(shared ? [shared] : []),
     { action: 'edit', label: 'Edit' },
     { action: 'logo', label: 'Change logo' },
     ...(p.logo_data ? [{ action: 'remove-logo', label: 'Remove logo' }] : []),
@@ -198,6 +204,7 @@ function openCardMenu(evt, p) {
     { action: 'delete', label: 'Delete', danger: true },
   ] : [
     { action: 'open', label: 'Open project' },
+    ...(shared ? [shared] : []),
     { action: 'reset', label: 'Reset my time' },
   ];
   openMenu(evt.currentTarget, items, (action) => MENU_ACTIONS[action](p));

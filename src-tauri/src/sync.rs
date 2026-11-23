@@ -20,7 +20,7 @@
 //!
 //! All HTTP is blocking (`ureq`) and happens outside the `Db` lock.
 
-use crate::db::{self, Db, Entity, Member, Org, OrgMember, Pending, RemoteTimer, TimerPush};
+use crate::db::{self, Db, Entity, Member, Org, OrgMember, Pending, RemoteTimer, SharedSession, TimerPush};
 use crate::events::{notify, Change};
 use crate::now_ms;
 use serde::{Deserialize, Serialize};
@@ -445,6 +445,18 @@ fn sync_orgs(db: &Db, rest: &Rest) -> SyncResult<bool> {
     db.apply_orgs(&orgs, &people).map_err(msg)
 }
 
+/// Replaces the local shared sessions with `my_shared_sessions()`. A server
+/// without shared sessions answers 404: skipped.
+fn sync_sessions(db: &Db, rest: &Rest) -> SyncResult<bool> {
+    let rows = match rest.rpc("my_shared_sessions", json!({})) {
+        Ok(v) => v,
+        Err(e) if e.starts_with("Server error 404") => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let sessions: Vec<SharedSession> = serde_json::from_value(rows).map_err(msg)?;
+    db.apply_sessions(&sessions).map_err(msg)
+}
+
 fn pull_rows(db: &Db, rest: &Rest) -> SyncResult<bool> {
     let mut changed = false;
     for entity in Entity::ALL {
@@ -510,6 +522,7 @@ fn cycle(db: &Db, cfg: &Config, session: Session) -> SyncResult<bool> {
     push_rows(db, &rest)?;
     let mut changed = sync_members(db, &rest)?;
     changed |= sync_orgs(db, &rest)?;
+    changed |= sync_sessions(db, &rest)?;
     changed |= pull_rows(db, &rest)?;
     changed |= db.stop_filed_timers(now_ms()).map_err(msg)?;
     changed |= sync_timer(db, &rest)?;
@@ -671,6 +684,38 @@ pub fn remove_member(app: &AppHandle, project_id: &str, user_id: &str) -> SyncRe
     as_signed_in(app, |_, rest| {
         rest.rpc("remove_member", json!({ "p_project_id": project_id, "p_user_id": user_id }))
     })?;
+    run_cycle(app);
+    Ok(())
+}
+
+// ---------------------------------------------------------------- shared sessions
+
+/// Shares your running timer on a project with people in it, or adds them to
+/// the session you're in. Returns the session's id.
+pub fn share_session(app: &AppHandle, project_id: &str, user_ids: &[String]) -> SyncResult<String> {
+    run_cycle(app); // the server must have your timer first
+    let id = as_signed_in(app, |_, rest| {
+        rest.rpc("share_session", json!({ "p_project_id": project_id, "p_user_ids": user_ids }))
+    })?;
+    run_cycle(app);
+    Ok(text(id))
+}
+
+/// Joins a session you were asked to, from `started_at` (when this computer
+/// stopped what you were tracking). It then runs on this computer.
+pub fn join_session(app: &AppHandle, session_id: &str, started_at: i64) -> SyncResult<()> {
+    run_cycle(app); // what you stopped goes up first
+    as_signed_in(app, |db, rest| {
+        let device = device_id(db)?;
+        rest.rpc("join_session", json!({ "p_session_id": session_id, "p_started_at": started_at, "p_device_id": device }))
+    })?;
+    run_cycle(app);
+    Ok(())
+}
+
+/// Says no to a session you were asked to.
+pub fn decline_session(app: &AppHandle, session_id: &str) -> SyncResult<()> {
+    as_signed_in(app, |_, rest| rest.rpc("decline_session", json!({ "p_session_id": session_id })))?;
     run_cycle(app);
     Ok(())
 }

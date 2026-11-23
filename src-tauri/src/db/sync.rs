@@ -200,6 +200,24 @@ pub struct OrgMember {
     pub is_me: bool,
 }
 
+/// A shared session you started, are in, or are asked to (my_shared_sessions()).
+/// `people`: [{ user_id, name, status, joined_at }].
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SharedSession {
+    pub id: String,
+    pub project_id: String,
+    #[serde(default)]
+    pub project_name: String,
+    pub host_id: String,
+    #[serde(default)]
+    pub host_name: String,
+    pub started_at: i64,
+    /// "host" | "joined" | "asked"
+    pub my_status: String,
+    #[serde(default)]
+    pub people: Value,
+}
+
 /// A session on one of an organization's projects, for its dashboard.
 /// `user_id` is `None` for your own (as in time_entries).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -675,7 +693,8 @@ impl Db {
         muted(&mut conn, |c| {
             c.execute_batch(
                 "DELETE FROM time_entries; DELETE FROM daily_totals; DELETE FROM phases; DELETE FROM features;
-                 DELETE FROM projects; DELETE FROM sync_outbox; DELETE FROM org_members; DELETE FROM organizations;",
+                 DELETE FROM projects; DELETE FROM sync_outbox; DELETE FROM org_members; DELETE FROM organizations;
+                 DELETE FROM shared_sessions;",
             )
         })
     }
@@ -833,6 +852,53 @@ impl Db {
         let people_same =
             before_people.len() == kept.len() && kept.iter().all(|&m| before_people.iter().any(|b| same_person(m, b)));
         Ok(!(orgs_same && people_same))
+    }
+
+    /// Replaces the shared sessions with the server's. Returns true if anything changed.
+    pub fn apply_sessions(&self, sessions: &[SharedSession]) -> SqlResult<bool> {
+        let before = self.list_sessions()?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM shared_sessions", [])?;
+        for s in sessions {
+            tx.execute(
+                "INSERT OR REPLACE INTO shared_sessions
+                   (id, project_id, project_name, host_id, host_name, started_at, my_status, people)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![s.id, s.project_id, s.project_name, s.host_id, s.host_name, s.started_at, s.my_status, s.people.to_string()],
+            )?;
+        }
+        tx.commit()?;
+        drop(conn);
+        Ok(before.len() != sessions.len() || sessions.iter().any(|s| !before.contains(s)))
+    }
+
+    /// The shared sessions as of the last sync, oldest first.
+    pub fn list_sessions(&self) -> SqlResult<Vec<SharedSession>> {
+        self.conn()
+            .prepare(
+                "SELECT id, project_id, project_name, host_id, host_name, started_at, my_status, people
+                 FROM shared_sessions ORDER BY started_at",
+            )?
+            .query_map([], |r| {
+                let people: String = r.get(7)?;
+                Ok(SharedSession {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    project_name: r.get(2)?,
+                    host_id: r.get(3)?,
+                    host_name: r.get(4)?,
+                    started_at: r.get(5)?,
+                    my_status: r.get(6)?,
+                    people: serde_json::from_str(&people).unwrap_or(Value::Array(vec![])),
+                })
+            })?
+            .collect()
+    }
+
+    /// This device's user (the linked account), if any.
+    pub fn me(&self) -> SqlResult<Option<String>> {
+        linked_user(&self.conn())
     }
 
     /// Your organizations by name, each with how many people are in it.

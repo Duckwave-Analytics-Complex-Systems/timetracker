@@ -435,6 +435,34 @@
     </form>
   </dialog>
 
+  <!-- Shared session: pick people from the project (js/widget/sessions.js) -->
+  <dialog id="sessionDialog" class="dialog">
+    <form id="sessionForm" method="dialog" novalidate>
+      <h2 id="sessionTitle">Start with…</h2>
+      <p class="field-hint">Each of you tracks this session under your own name. People with nothing running are in straight away; anyone tracking something else is asked first.</p>
+      <div id="sessionPeople" class="session-people"></div>
+      <p id="sessionError" class="field-error hidden"></p>
+      <div class="dialog-actions">
+        <button type="button" id="sessionCancel" class="btn-secondary">Cancel</button>
+        <button type="submit" id="sessionSubmit" class="btn-primary">Start</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Asked to join a shared session while tracking something else (js/widget/sessions.js) -->
+  <dialog id="inviteDialog" class="dialog">
+    <form id="inviteForm" method="dialog" novalidate>
+      <h2>Shared session</h2>
+      <p id="inviteText" class="end-intro"></p>
+      <p id="inviteStops" class="field-hint"></p>
+      <p id="inviteError" class="field-error hidden"></p>
+      <div class="dialog-actions">
+        <button type="button" id="inviteNo" class="btn-secondary">Not now</button>
+        <button type="submit" id="inviteYes" class="btn-primary">Join</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Workspace switcher list (js/widget/orgs.js) -->
   <div id="workspaceMenu" class="card-menu workspace-menu hidden" role="menu"></div>
 

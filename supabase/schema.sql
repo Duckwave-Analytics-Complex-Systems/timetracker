@@ -24,6 +24,11 @@
 -- the org, without a project_members row; members still see only the projects
 -- they're added to. `organizations` and `org_members` are reached only through
 -- the functions in "organizations" below.
+--
+-- Shared sessions: one person's timer shared with others in the project (a
+-- meeting, pairing). Everyone in it tracks the same time, each under their own
+-- name: the project gets the whole, each account its part. Reached only
+-- through the functions in "shared sessions" below.
 
 -- ---------------------------------------------------------------- tables
 
@@ -158,6 +163,30 @@ create table if not exists public.org_members (
   primary key (org_id, user_id)
 );
 
+-- A shared session: started by `host_id` on their own timer (started_at = its
+-- start). Ends when the host's timer stops or moves to another project.
+create table if not exists public.shared_sessions (
+  id               text primary key,
+  project_id       text not null references public.projects on delete cascade,
+  host_id          uuid not null references auth.users on delete cascade,
+  started_at       bigint not null,   -- unix ms, the host's timer start
+  ended_at         bigint,            -- unix ms; null while it runs
+  created_at       timestamptz not null default clock_timestamp()
+);
+
+-- Who else is in it. 'joined': their timer runs on it from joined_at.
+-- 'asked': they were tracking something else and haven't answered yet.
+-- 'declined' / 'left': no longer in it (a stopped or moved timer is leaving).
+create table if not exists public.shared_session_people (
+  session_id       text not null references public.shared_sessions on delete cascade,
+  user_id          uuid not null references auth.users on delete cascade,
+  status           text not null check (status in ('joined', 'asked', 'declined', 'left')),
+  joined_at        bigint,            -- unix ms, their timer start in it
+  added_by         uuid references auth.users on delete set null,
+  updated_at       timestamptz not null default clock_timestamp(),
+  primary key (session_id, user_id)
+);
+
 -- "Did you leave anything pending?": a person's checklist per project, from the
 -- dialog shown when a session stops. Private to that person, even on a shared project.
 create table if not exists public.pending_items (
@@ -191,6 +220,11 @@ alter table public.projects add column if not exists active_feature_id text;
 alter table public.time_entries add column if not exists feature_id text;
 alter table public.time_entries add column if not exists note text;
 alter table public.projects add column if not exists final_payment double precision;
+-- Shared sessions: where to send a device its push notifications (Expo), and
+-- in which language.
+alter table public.devices add column if not exists push_token text;
+alter table public.devices add column if not exists language text;
+
 -- The organization the project belongs to; null = personal. Deleting the
 -- organization makes its projects personal again (their owners keep them).
 alter table public.projects add column if not exists org_id text
@@ -258,6 +292,8 @@ alter table public.time_entries drop constraint if exists time_entries_user_id_f
 create index if not exists project_members_user       on public.project_members (user_id);
 create index if not exists org_members_user           on public.org_members (user_id);
 create index if not exists projects_org               on public.projects (org_id);
+create index if not exists shared_sessions_open       on public.shared_sessions (project_id) where ended_at is null;
+create index if not exists shared_session_people_user on public.shared_session_people (user_id);
 create index if not exists phases_project             on public.phases (project_id);
 create index if not exists features_project           on public.features (project_id);
 create index if not exists time_entries_project       on public.time_entries (project_id);
@@ -462,6 +498,8 @@ alter table public.profiles enable row level security;
 alter table public.project_members enable row level security;
 alter table public.organizations enable row level security;
 alter table public.org_members enable row level security;
+alter table public.shared_sessions enable row level security;
+alter table public.shared_session_people enable row level security;
 drop policy if exists own_rows on public.profiles;
 drop policy if exists own_membership_read on public.project_members;
 
@@ -957,6 +995,282 @@ begin
   perform set_config('tt.internal', 'off', true);
 end $$;
 
+-- ---------------------------------------------------------------- shared sessions
+
+create or replace function public.now_ms() returns bigint
+language sql volatile set search_path = '' as $$
+  select (extract(epoch from clock_timestamp()) * 1000)::bigint
+$$;
+
+-- Books someone's part of a shared session the way their own device would
+-- (pause_one / pauseOne): the same id, so whichever books it first wins and
+-- the other is a no-op. Booked to the phase and feature they book time to.
+create or replace function public.book_session_part(p_project_id text, p_user_id uuid, p_start bigint, p_end bigint)
+returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  secs bigint := greatest(0, floor((p_end - p_start) / 1000.0))::bigint;
+  ms public.member_state;
+begin
+  if secs <= 0 then
+    return;
+  end if;
+  select * into ms from public.member_state where id = p_project_id || ':' || p_user_id::text and not deleted;
+  insert into public.time_entries (id, user_id, project_id, start_ts, end_ts, seconds, phase_id, feature_id)
+  values (p_project_id || '@' || p_start || '@' || p_user_id::text, p_user_id, p_project_id,
+          p_start, p_start + secs * 1000, secs, ms.active_phase_id, ms.active_feature_id)
+  on conflict (id) do nothing;
+end $$;
+
+-- Starts someone's timer on a project, as if they had (straight into a session).
+create or replace function public.start_timer_for(p_user_id uuid, p_project_id text, p_started_at bigint, p_device_id text)
+returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  insert into public.timers (user_id) values (p_user_id) on conflict (user_id) do nothing;
+  update public.timers
+     set project_id = p_project_id,
+         phase_id = (select active_phase_id from public.member_state
+                     where id = p_project_id || ':' || p_user_id::text and not deleted),
+         started_at = p_started_at, ended_at = null, running = true, device_id = p_device_id
+   where user_id = p_user_id;
+end $$;
+
+-- Shares your running timer with people in its project, or adds people to the
+-- session you're in. Someone with no timer running is in straight away (their
+-- timer starts now); someone tracking something else is asked first
+-- (join_session / decline_session). Only the project's members. Returns the
+-- session's id.
+create or replace function public.share_session(p_project_id text, p_user_ids uuid[]) returns text
+language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := auth.uid();
+  mine public.timers;
+  ss public.shared_sessions;
+  t public.timers;
+  target uuid;
+  now_at bigint := public.now_ms();
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+  if not exists (select 1 from public.project_members where project_id = p_project_id and user_id = uid) then
+    raise exception 'Only the project''s members can share a session on it.';
+  end if;
+  select * into mine from public.timers where user_id = uid;
+  if not found or not mine.running or mine.project_id is distinct from p_project_id then
+    raise exception 'Start the timer on this project first.';
+  end if;
+
+  -- The session you're in on this project, yours or one you joined; else a new one.
+  select x.* into ss from public.shared_sessions x
+  where x.project_id = p_project_id and x.ended_at is null
+    and ((x.host_id = uid and x.started_at = mine.started_at)
+         or exists (select 1 from public.shared_session_people sp
+                    where sp.session_id = x.id and sp.user_id = uid and sp.status = 'joined'
+                      and sp.joined_at = mine.started_at))
+  limit 1;
+  if not found then
+    insert into public.shared_sessions (id, project_id, host_id, started_at)
+    values (gen_random_uuid()::text, p_project_id, uid, mine.started_at)
+    returning * into ss;
+  end if;
+
+  foreach target in array coalesce(p_user_ids, '{}'::uuid[]) loop
+    continue when target = uid or target = ss.host_id;
+    if not exists (select 1 from public.project_members where project_id = p_project_id and user_id = target) then
+      raise exception 'Only the project''s members can be in its sessions.';
+    end if;
+    continue when exists (select 1 from public.shared_session_people
+                          where session_id = ss.id and user_id = target and status = 'joined');
+    select * into t from public.timers where user_id = target;
+    if found and t.running and t.project_id = p_project_id then
+      -- Already tracking this project: they're in, from when they started.
+      insert into public.shared_session_people (session_id, user_id, status, joined_at, added_by)
+      values (ss.id, target, 'joined', t.started_at, uid)
+      on conflict (session_id, user_id) do update
+        set status = 'joined', joined_at = excluded.joined_at, added_by = uid, updated_at = clock_timestamp();
+    elsif found and t.running then
+      -- Tracking something else: asked first.
+      insert into public.shared_session_people (session_id, user_id, status, added_by)
+      values (ss.id, target, 'asked', uid)
+      on conflict (session_id, user_id) do update
+        set status = 'asked', added_by = uid, updated_at = clock_timestamp();
+    else
+      -- Nothing running: straight in, from now.
+      perform public.start_timer_for(target, p_project_id, now_at, 'shared:' || ss.id);
+      insert into public.shared_session_people (session_id, user_id, status, joined_at, added_by)
+      values (ss.id, target, 'joined', now_at, uid)
+      on conflict (session_id, user_id) do update
+        set status = 'joined', joined_at = now_at, added_by = uid, updated_at = clock_timestamp();
+    end if;
+  end loop;
+  return ss.id;
+end $$;
+
+-- You were asked to join: your timer moves to the session's project from
+-- p_started_at (when your device stopped and booked what you were tracking;
+-- now if null). p_device_id: the device you answered on, which then runs it.
+create or replace function public.join_session(p_session_id text, p_started_at bigint, p_device_id text) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := auth.uid();
+  ss public.shared_sessions;
+  start_at bigint := coalesce(p_started_at, public.now_ms());
+begin
+  if not exists (select 1 from public.shared_session_people
+                 where session_id = p_session_id and user_id = uid and status in ('asked', 'declined', 'left')) then
+    raise exception 'You aren''t asked to this session.';
+  end if;
+  select * into ss from public.shared_sessions where id = p_session_id;
+  if ss.ended_at is not null then
+    raise exception 'This session has ended.';
+  end if;
+  if not exists (select 1 from public.project_members where project_id = ss.project_id and user_id = uid) then
+    raise exception 'Only the project''s members can be in its sessions.';
+  end if;
+  perform public.start_timer_for(uid, ss.project_id, start_at, coalesce(p_device_id, 'shared:' || ss.id));
+  update public.shared_session_people
+     set status = 'joined', joined_at = start_at, updated_at = clock_timestamp()
+   where session_id = p_session_id and user_id = uid;
+end $$;
+
+-- You were asked to join and said no.
+create or replace function public.decline_session(p_session_id text) returns void
+language sql security definer set search_path = '' as $$
+  update public.shared_session_people
+     set status = 'declined', updated_at = clock_timestamp()
+   where session_id = p_session_id and user_id = auth.uid() and status = 'asked'
+$$;
+
+-- The sessions running now that you started, are in, or are asked to; with
+-- who's in each. my_status: 'host' | 'joined' | 'asked'.
+create or replace function public.my_shared_sessions()
+returns table (id text, project_id text, project_name text, host_id uuid, host_name text, started_at bigint,
+               my_status text, people jsonb)
+language sql stable security definer set search_path = '' as $$
+  select x.id, x.project_id, coalesce(p.name, ''), x.host_id, coalesce(hp.display_name, ''), x.started_at,
+         case when x.host_id = auth.uid() then 'host' else me.status end,
+         (select coalesce(jsonb_agg(jsonb_build_object(
+                   'user_id', sp.user_id, 'name', coalesce(pr.display_name, ''), 'status', sp.status,
+                   'joined_at', sp.joined_at) order by sp.updated_at), '[]'::jsonb)
+            from public.shared_session_people sp
+            left join public.profiles pr on pr.id = sp.user_id
+           where sp.session_id = x.id and sp.status in ('joined', 'asked'))
+  from public.shared_sessions x
+  join public.projects p on p.id = x.project_id
+  left join public.shared_session_people me on me.session_id = x.id and me.user_id = auth.uid()
+  left join public.profiles hp on hp.id = x.host_id
+  where x.ended_at is null and (x.host_id = auth.uid() or me.status in ('joined', 'asked'))
+$$;
+
+-- A timer stopped or moved to another session. If it was in someone's shared
+-- session, that person has left it (their device books their part). If it
+-- started one, the session ends: everyone still in it stops at the same time,
+-- and their parts are booked here (their devices may be off).
+create or replace function public.timer_moved() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  ss record;
+  p record;
+  stop_at bigint;
+begin
+  if not old.running or old.started_at is null then
+    return new;
+  end if;
+  if new.running and new.project_id is not distinct from old.project_id
+     and new.started_at is not distinct from old.started_at then
+    return new;
+  end if;
+  stop_at := case when new.running then coalesce(new.started_at, public.now_ms())
+                  else coalesce(new.ended_at, public.now_ms()) end;
+
+  update public.shared_session_people sp
+     set status = 'left', updated_at = clock_timestamp()
+   where sp.user_id = old.user_id and sp.status = 'joined' and sp.joined_at = old.started_at
+     and sp.session_id in (select x.id from public.shared_sessions x
+                           where x.project_id = old.project_id and x.ended_at is null);
+
+  for ss in
+    select * from public.shared_sessions x
+    where x.host_id = old.user_id and x.project_id = old.project_id
+      and x.started_at = old.started_at and x.ended_at is null
+  loop
+    update public.shared_sessions set ended_at = stop_at where id = ss.id;
+    for p in
+      select sp.user_id, sp.joined_at from public.shared_session_people sp
+      join public.timers t on t.user_id = sp.user_id
+      where sp.session_id = ss.id and sp.status = 'joined'
+        and t.running and t.project_id = ss.project_id and t.started_at = sp.joined_at
+    loop
+      update public.timers set running = false, ended_at = greatest(stop_at, p.joined_at) where user_id = p.user_id;
+      perform public.book_session_part(ss.project_id, p.user_id, p.joined_at, greatest(stop_at, p.joined_at));
+    end loop;
+    update public.shared_session_people
+       set status = case status when 'joined' then 'left' when 'asked' then 'declined' else status end,
+           updated_at = clock_timestamp()
+     where session_id = ss.id;
+  end loop;
+  return new;
+end $$;
+
+drop trigger if exists timer_moved on public.timers;
+create trigger timer_moved after update on public.timers
+for each row execute function public.timer_moved();
+
+-- Tells someone they were added to a session (straight in, or asked), on
+-- every device that gave a push token: an Expo push through pg_net. Skipped
+-- when the pg_net extension isn't enabled (Database > Extensions).
+create or replace function public.notify_session_person() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  info record;
+  d record;
+  es boolean;
+  title text;
+  body text;
+begin
+  if new.status not in ('joined', 'asked') or new.added_by is null or new.added_by = new.user_id then
+    return new;
+  end if;
+  if tg_op = 'UPDATE' and old.status not in ('declined', 'left') then
+    return new; -- not newly added (e.g. answering, or already in)
+  end if;
+  if not exists (select 1 from pg_catalog.pg_proc f join pg_catalog.pg_namespace n on n.oid = f.pronamespace
+                 where n.nspname = 'net' and f.proname = 'http_post') then
+    return new;
+  end if;
+  select pr.name as project, coalesce(h.display_name, '') as host into info
+  from public.shared_sessions x
+  join public.projects pr on pr.id = x.project_id
+  left join public.profiles h on h.id = new.added_by
+  where x.id = new.session_id;
+
+  for d in select push_token, language from public.devices where user_id = new.user_id and push_token is not null loop
+    es := coalesce(d.language, '') like 'es%';
+    if new.status = 'asked' then
+      title := case when es then info.host || ' te invitó a una sesión' else info.host || ' invited you to a session' end;
+      body := case when es then info.project || ': ¿dejar lo que estás registrando y unirte?'
+                   else info.project || ': stop what you''re tracking and join?' end;
+    else
+      title := case when es then info.host || ' te agregó a una sesión' else info.host || ' added you to a session' end;
+      body := case when es then 'Ya estás registrando ' || info.project || '.'
+                   else 'You''re tracking ' || info.project || ' now.' end;
+    end if;
+    perform net.http_post(
+      url := 'https://exp.host/--/api/v2/push/send',
+      body := jsonb_build_object(
+        'to', d.push_token, 'title', title, 'body', body, 'sound', 'default', 'channelId', 'sessions',
+        'priority', 'high', 'data', jsonb_build_object('url', '/session-invite?id=' || new.session_id)),
+      headers := '{"Content-Type": "application/json"}'::jsonb);
+  end loop;
+  return new;
+end $$;
+
+drop trigger if exists notify_session_person on public.shared_session_people;
+create trigger notify_session_person after insert or update of status on public.shared_session_people
+for each row execute function public.notify_session_person();
+
 -- ---------------------------------------------------------------- profile (Android 2.4)
 
 -- Changes your profile. Only the keys present in p_changes change; each is
@@ -1177,14 +1491,19 @@ begin
     'is_org_member(text)', 'is_org_admin(text)', 'can_manage_project(text)', 'add_member_by_id(text, uuid)',
     'my_orgs()', 'my_org_members()', 'create_org(text)', 'join_org(text)', 'add_org_member(text, text)',
     'remove_org_member(text, uuid)', 'set_org_role(text, uuid, text)', 'update_org(text, jsonb)',
-    'reset_org_join_code(text)', 'delete_org(text)', 'org_presence(text)'
+    'reset_org_join_code(text)', 'delete_org(text)', 'org_presence(text)',
+    'share_session(text, uuid[])', 'join_session(text, bigint, text)', 'decline_session(text)', 'my_shared_sessions()'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);
   end loop;
 
   -- Used only by the functions above, never called by the apps.
-  foreach f in array array['transfer_project(text, uuid)', 'new_org_code()', 'clean_org_name(text)', 'guard_project()'] loop
+  foreach f in array array[
+    'transfer_project(text, uuid)', 'new_org_code()', 'clean_org_name(text)', 'guard_project()',
+    'book_session_part(text, uuid, bigint, bigint)', 'start_timer_for(uuid, text, bigint, text)',
+    'timer_moved()', 'notify_session_person()'
+  ] loop
     execute format('revoke all on function public.%s from public, anon, authenticated', f);
   end loop;
 end $$;
