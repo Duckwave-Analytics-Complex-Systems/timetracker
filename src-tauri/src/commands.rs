@@ -4,7 +4,7 @@
 //! `notify` the windows when data changed. JS calls these through
 //! js/core/api.js, which is the only place `invoke` names appear.
 
-use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Org, OrgEntry, OrgMember, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session, SessionSpan};
+use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Org, OrgEntry, OrgMember, SharedSession, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session, SessionSpan};
 use crate::events::{notify, Change};
 use crate::sync::{self as cloud, SyncStatus};
 use crate::{now_ms, watchdog};
@@ -438,6 +438,38 @@ pub async fn cloud_reset_org_join_code(app: AppHandle, org_id: String) -> CmdRes
 #[tauri::command]
 pub async fn cloud_delete_org(app: AppHandle, org_id: String) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || cloud::delete_org(&app, &org_id)).await.map_err(msg)?
+}
+
+// ---------------------------------------------------------------- shared sessions
+
+/// The shared sessions you started, are in, or are asked to, and who you are.
+#[derive(Serialize)]
+pub struct SessionsView {
+    me: Option<String>,
+    sessions: Vec<SharedSession>,
+}
+
+#[tauri::command]
+pub fn get_shared_sessions(db: State<Db>) -> CmdResult<SessionsView> {
+    Ok(SessionsView { me: db.me().map_err(msg)?, sessions: db.list_sessions().map_err(msg)? })
+}
+
+/// Shares your running timer with people in the project. Returns the session's id.
+#[tauri::command]
+pub async fn cloud_share_session(app: AppHandle, project_id: String, user_ids: Vec<String>) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || cloud::share_session(&app, &project_id, &user_ids)).await.map_err(msg)?
+}
+
+/// Joins a session you were asked to (after pausing what you were tracking).
+#[tauri::command]
+pub async fn cloud_join_session(app: AppHandle, session_id: String, started_at: i64) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || cloud::join_session(&app, &session_id, started_at)).await.map_err(msg)?
+}
+
+/// Says no to a session you were asked to.
+#[tauri::command]
+pub async fn cloud_decline_session(app: AppHandle, session_id: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || cloud::decline_session(&app, &session_id)).await.map_err(msg)?
 }
 
 // ---------------------------------------------------------------- windows

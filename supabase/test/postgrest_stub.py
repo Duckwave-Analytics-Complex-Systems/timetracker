@@ -12,7 +12,8 @@ DB_ARGS = ["psql", "-h", "127.0.0.1", "-p", sys.argv[2], "-U", "postgres", "-d",
 TABLES = {"projects", "features", "phases", "member_state", "time_entries", "timers"}
 ONE_ROW = {"ensure_profile", "set_display_name", "push_timer"}
 SCALAR = {"add_member", "remove_member", "add_member_by_id", "create_org", "join_org", "add_org_member",
-          "remove_org_member", "set_org_role", "update_org", "reset_org_join_code", "delete_org"}
+          "remove_org_member", "set_org_role", "update_org", "reset_org_join_code", "delete_org",
+          "share_session", "join_session", "decline_session"}
 NAME = re.compile(r"^[a-z_]+$")
 
 

@@ -545,3 +545,5 @@
 .check-row input { margin-top: 2px; accent-color: var(--accent-running); }
 .os-person > .os-track { flex: none; }
 #orgCurrency { text-transform: uppercase; }
+.card-with { font-size: 11.5px; color: var(--accent-running); margin-top: 1px; }
+.session-people { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; max-height: 220px; overflow-y: auto; }

@@ -56,6 +56,20 @@ const TABLES: &str = "
         created_at   INTEGER NOT NULL DEFAULT 0
     );
 
+    -- v6.3: shared sessions you started, are in, or are asked to join, from
+    -- my_shared_sessions() on every sync. Never pushed. people: JSON
+    -- [{ user_id, name, status, joined_at }]. Same as the Android app's db.js.
+    CREATE TABLE IF NOT EXISTS shared_sessions (
+        id           TEXT PRIMARY KEY,
+        project_id   TEXT NOT NULL,
+        project_name TEXT NOT NULL DEFAULT '',
+        host_id      TEXT NOT NULL,
+        host_name    TEXT NOT NULL DEFAULT '',
+        started_at   INTEGER NOT NULL,
+        my_status    TEXT NOT NULL,                  -- 'host' | 'joined' | 'asked'
+        people       TEXT NOT NULL DEFAULT '[]'
+    );
+
     CREATE TABLE IF NOT EXISTS org_members (
         org_id       TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
         user_id      TEXT NOT NULL,

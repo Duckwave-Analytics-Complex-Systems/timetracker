@@ -97,6 +97,16 @@ export const api = {
   orgEntries: (orgId, fromMs) => invoke('get_org_entries', { orgId, fromMs }),
   /** From the server: [{ user_id, display_name, role, weekly_goal_hours, running, project_id, project_name, started_at }] */
   orgPresence: (orgId) => invoke('cloud_org_presence', { orgId }),
+
+  // ---- shared sessions (supabase/schema.sql, "shared sessions")
+  /** { me, sessions: [{ id, project_id, project_name, host_id, host_name, started_at, my_status, people }] } */
+  sharedSessions: () => invoke('get_shared_sessions'),
+  /** Shares your running timer on the project with userIds (people in it). Resolves to the session's id. */
+  shareSession: (projectId, userIds) => invoke('cloud_share_session', { projectId, userIds }),
+  /** Joins a session you were asked to, from startedAt (after pausing what you were tracking). */
+  joinSession: (sessionId, startedAt) => invoke('cloud_join_session', { sessionId, startedAt }),
+  declineSession: (sessionId) => invoke('cloud_decline_session', { sessionId }),
+
 };
 
 /**

@@ -17,6 +17,8 @@ export const state = {
   dailyRows: [], // [{ day, project_id, seconds }] for the last DAILY_FETCH_DAYS days
   spans: [], // your sessions [{ project_id, start_ts, end_ts }] for the last HEATMAP_FETCH_DAYS days
   orgs: [], // your organizations, by name (api.orgs)
+  sessions: [], // shared sessions you started, are in, or are asked to (api.sharedSessions)
+  me: null, // your user id once signed in
   // Which projects the list shows: PERSONAL or an organization's id. Kept on
   // this computer; one you're no longer in reads as PERSONAL.
   workspace: localStorage.getItem(WORKSPACE_STORAGE_KEY) || PERSONAL,
@@ -40,17 +42,18 @@ export function onRefresh(fn) {
 export async function refresh() {
   const request = ++latestRequest;
   const today = new Date();
-  const [projects, archived, dailyRows, spans, orgs] = await Promise.all([
+  const [projects, archived, dailyRows, spans, orgs, shared] = await Promise.all([
     api.projects(),
     api.archivedProjects(),
     api.daily(dayKey(addDays(today, -(DAILY_FETCH_DAYS - 1))), dayKey(today)),
     api.sessionSpans(addDays(startOfToday(), -(HEATMAP_FETCH_DAYS - 1)).getTime(), Date.now()),
     api.orgs(),
+    api.sharedSessions().catch(() => ({ me: null, sessions: [] })),
   ]);
   if (request !== latestRequest) return; // a newer refresh already landed
   const workspace = validWorkspace(localStorage.getItem(WORKSPACE_STORAGE_KEY) || PERSONAL, orgs);
   setOrgCurrencies(orgs); // before anything draws money
-  Object.assign(state, { projects, archived, dailyRows, spans, orgs, workspace });
+  Object.assign(state, { projects, archived, dailyRows, spans, orgs, workspace, sessions: shared.sessions, me: shared.me });
   listeners.forEach((fn) => fn());
 }
 

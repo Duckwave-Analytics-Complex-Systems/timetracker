@@ -12,6 +12,7 @@ import { renderArchive } from './archive.js';
 import { ensureColorSlots } from './colors.js';
 import { renderOrgStats } from './org-stats.js';
 import { renderWorkspace } from './orgs.js';
+import { checkInvites } from './sessions.js';
 import { renderProjects } from './projects.js';
 import { initCloud, refreshCloud } from './cloud.js';
 import { initSettings } from './settings.js';
@@ -38,6 +39,7 @@ function renderAll() {
 onRefresh(() => {
   ensureColorSlots(state.projects);
   renderAll();
+  checkInvites();
 });
 
 // ---------------------------------------------------------------- tabs
