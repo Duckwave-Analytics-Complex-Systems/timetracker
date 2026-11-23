@@ -10,6 +10,7 @@ import { setupTitlebar } from '../core/titlebar.js';
 import { useSharedTheme } from '../core/theme.js';
 import { renderArchive } from './archive.js';
 import { ensureColorSlots } from './colors.js';
+import { renderWorkspace } from './orgs.js';
 import { renderProjects } from './projects.js';
 import { initCloud, refreshCloud } from './cloud.js';
 import { initSettings } from './settings.js';
@@ -25,6 +26,7 @@ let currentView = 'projects';
 // ---------------------------------------------------------------- rendering
 
 function renderAll() {
+  renderWorkspace();
   renderProjects();
   renderToday();
   if (currentView === 'stats' && !chartHover) renderStats();

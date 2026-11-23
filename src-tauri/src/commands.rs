@@ -4,7 +4,7 @@
 //! `notify` the windows when data changed. JS calls these through
 //! js/core/api.js, which is the only place `invoke` names appear.
 
-use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session, SessionSpan};
+use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Org, OrgMember, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session, SessionSpan};
 use crate::events::{notify, Change};
 use crate::sync::{self as cloud, SyncStatus};
 use crate::{now_ms, watchdog};
@@ -39,9 +39,26 @@ pub fn get_archived_projects(db: State<Db>) -> CmdResult<Vec<Project>> {
     db.list_projects(true).map_err(msg)
 }
 
+/// `org_id`: the organization to create it in; none = a personal project.
 #[tauri::command]
-pub fn add_project(app: AppHandle, db: State<Db>, name: String, hourly_rate: f64, people_count: i64) -> CmdResult<()> {
-    db.create_project(&db::new_id(), name.trim(), hourly_rate, people_count, now_ms()).map_err(msg)?;
+pub fn add_project(
+    app: AppHandle, db: State<Db>, name: String, hourly_rate: f64, people_count: i64, org_id: Option<String>,
+) -> CmdResult<()> {
+    let id = db::new_id();
+    db.create_project(&id, name.trim(), hourly_rate, people_count, now_ms()).map_err(msg)?;
+    if org_id.is_some() {
+        db.set_project_org(&id, org_id.as_deref()).map_err(msg)?;
+    }
+    notify(&app, Change::Projects);
+    Ok(())
+}
+
+/// Moves a project into an organization, or back to personal (`None`). The
+/// frontend offers only the moves the server allows (see `moveTargets` in
+/// js/core/orgs.js); the server keeps the old value for any other.
+#[tauri::command]
+pub fn set_project_org(app: AppHandle, db: State<Db>, id: String, org_id: Option<String>) -> CmdResult<()> {
+    db.set_project_org(&id, org_id.as_deref()).map_err(msg)?;
     notify(&app, Change::Projects);
     Ok(())
 }
@@ -335,6 +352,68 @@ pub async fn cloud_add_member(app: AppHandle, project_id: String, share_code: St
 #[tauri::command]
 pub async fn cloud_remove_member(app: AppHandle, project_id: String, user_id: String) -> CmdResult<()> {
     tauri::async_runtime::spawn_blocking(move || cloud::remove_member(&app, &project_id, &user_id)).await.map_err(msg)?
+}
+
+// ---------------------------------------------------------------- organizations
+
+/// Your organizations (as of the last sync), by name.
+#[tauri::command]
+pub fn get_orgs(db: State<Db>) -> CmdResult<Vec<Org>> {
+    db.list_orgs().map_err(msg)
+}
+
+/// The people in one of your organizations.
+#[tauri::command]
+pub fn get_org_members(db: State<Db>, org_id: String) -> CmdResult<Vec<OrgMember>> {
+    db.org_members(&org_id).map_err(msg)
+}
+
+/// Creates an organization with you as its owner. Returns its id.
+#[tauri::command]
+pub async fn cloud_create_org(app: AppHandle, name: String) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || cloud::create_org(&app, &name)).await.map_err(msg)?
+}
+
+/// Joins an organization by its invite code. Returns its id.
+#[tauri::command]
+pub async fn cloud_join_org(app: AppHandle, code: String) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || cloud::join_org(&app, &code)).await.map_err(msg)?
+}
+
+/// Adds someone to an organization by their share code. Returns their name.
+#[tauri::command]
+pub async fn cloud_add_org_member(app: AppHandle, org_id: String, share_code: String) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || cloud::add_org_member(&app, &org_id, &share_code)).await.map_err(msg)?
+}
+
+/// Removes someone from an organization. Removing yourself is leaving it.
+#[tauri::command]
+pub async fn cloud_remove_org_member(app: AppHandle, org_id: String, user_id: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || cloud::remove_org_member(&app, &org_id, &user_id)).await.map_err(msg)?
+}
+
+/// "admin" | "member", or "owner" to hand the organization over.
+#[tauri::command]
+pub async fn cloud_set_org_role(app: AppHandle, org_id: String, user_id: String, role: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || cloud::set_org_role(&app, &org_id, &user_id, &role)).await.map_err(msg)?
+}
+
+/// Changes an organization's name, logo or defaults.
+#[tauri::command]
+pub async fn cloud_update_org(app: AppHandle, org_id: String, changes: serde_json::Value) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || cloud::update_org(&app, &org_id, changes)).await.map_err(msg)?
+}
+
+/// A new invite code; the old one stops working. Returns it.
+#[tauri::command]
+pub async fn cloud_reset_org_join_code(app: AppHandle, org_id: String) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || cloud::reset_org_join_code(&app, &org_id)).await.map_err(msg)?
+}
+
+/// Deletes an organization. Its projects become personal projects of their owners.
+#[tauri::command]
+pub async fn cloud_delete_org(app: AppHandle, org_id: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || cloud::delete_org(&app, &org_id)).await.map_err(msg)?
 }
 
 // ---------------------------------------------------------------- windows

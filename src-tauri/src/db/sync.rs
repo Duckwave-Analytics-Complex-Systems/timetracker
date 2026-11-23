@@ -23,6 +23,11 @@
 //! `member_state`, not on the project row. `project_members` is refreshed from
 //! the server every cycle (`apply_members`).
 //!
+//! **Organizations.** `organizations` and `org_members` are replaced from the
+//! server every cycle (`apply_orgs`) and never pushed. A project's `org_id`
+//! is a project field and goes up with the row; the server keeps the old
+//! value if the change isn't allowed (`guard_project()`).
+//!
 //! **Timer.** Not a row: see `reconcile_timer` and `push_timer()` in the
 //! server schema.
 //!
@@ -34,7 +39,7 @@ use super::days::{record_daily, unrecord_daily};
 use super::timer::{entry_id, pause_one};
 use super::Db;
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// Run on every launch (from `schema::migrate`). Idempotent.
@@ -58,7 +63,7 @@ pub(super) const SYNC_TABLES: &str = "
     DROP TRIGGER IF EXISTS sync_project_upd;
     CREATE TRIGGER sync_project_upd AFTER UPDATE OF
         name, hourly_rate, archived, archived_at, logo_data, people_count,
-        description, start_day, due_day, budget_hours, final_payment ON projects
+        description, start_day, due_day, budget_hours, final_payment, org_id ON projects
     WHEN NOT EXISTS (SELECT 1 FROM sync_mute) BEGIN
         INSERT OR REPLACE INTO sync_outbox VALUES ('project', NEW.id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM sync_outbox));
     END;
@@ -159,6 +164,40 @@ pub struct Member {
     pub user_id: String,
     pub role: String,
     pub display_name: String,
+}
+
+/// An organization you're in, from the server's `my_orgs()`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct Org {
+    pub id: String,
+    pub name: String,
+    pub logo_data: Option<String>,
+    pub currency: Option<String>,
+    pub default_rate: Option<f64>,
+    pub week_start: Option<i64>,
+    /// Only for its owner and admins.
+    pub join_code: Option<String>,
+    /// Yours: "owner" | "admin" | "member".
+    pub role: String,
+    #[serde(default)]
+    pub created_at: i64,
+    /// How many people are in it (local only; 0 from the server).
+    #[serde(default)]
+    pub people: i64,
+}
+
+/// A person in an organization, from the server's `my_org_members()`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct OrgMember {
+    pub org_id: String,
+    pub user_id: String,
+    pub role: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub joined_at: i64,
+    /// Local only: this device's user.
+    #[serde(default)]
+    pub is_me: bool,
 }
 
 /// A row of the "Hours by person" table. `user_id` is `None` for time tracked
@@ -267,7 +306,7 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
         Entity::Project => conn
             .query_row(
                 "SELECT id, name, hourly_rate, created_at, archived, archived_at, logo_data, people_count,
-                        description, start_day, due_day, budget_hours, final_payment
+                        description, start_day, due_day, budget_hours, final_payment, org_id
                  FROM projects WHERE id = ?1",
                 params![id],
                 |r| {
@@ -285,6 +324,7 @@ fn row_json(conn: &Connection, entity: Entity, id: &str) -> SqlResult<Option<Val
                         "due_day": r.get::<_, Option<String>>(10)?,
                         "budget_hours": r.get::<_, Option<f64>>(11)?,
                         "final_payment": r.get::<_, Option<f64>>(12)?,
+                        "org_id": r.get::<_, Option<String>>(13)?,
                         "deleted": false,
                     }))
                 },
@@ -403,14 +443,16 @@ fn apply_project(conn: &Connection, v: &Value) -> SqlResult<bool> {
     }
     conn.execute(
         "INSERT INTO projects (id, name, hourly_rate, created_at, archived, archived_at, logo_data,
-                               people_count, description, start_day, due_day, budget_hours, final_payment)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                               people_count, description, start_day, due_day, budget_hours, final_payment,
+                               org_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, hourly_rate = excluded.hourly_rate, created_at = excluded.created_at,
             archived = excluded.archived, archived_at = excluded.archived_at, logo_data = excluded.logo_data,
             people_count = excluded.people_count, description = excluded.description,
             start_day = excluded.start_day, due_day = excluded.due_day,
-            budget_hours = excluded.budget_hours, final_payment = excluded.final_payment",
+            budget_hours = excluded.budget_hours, final_payment = excluded.final_payment,
+            org_id = excluded.org_id",
         params![
             id,
             s(v, "name").unwrap_or_default(),
@@ -425,6 +467,7 @@ fn apply_project(conn: &Connection, v: &Value) -> SqlResult<bool> {
             s(v, "due_day"),
             f(v, "budget_hours"),
             f(v, "final_payment"),
+            s(v, "org_id"),
         ],
     )?;
     Ok(true)
@@ -622,7 +665,7 @@ impl Db {
         muted(&mut conn, |c| {
             c.execute_batch(
                 "DELETE FROM time_entries; DELETE FROM daily_totals; DELETE FROM phases; DELETE FROM features;
-                 DELETE FROM projects; DELETE FROM sync_outbox;",
+                 DELETE FROM projects; DELETE FROM sync_outbox; DELETE FROM org_members; DELETE FROM organizations;",
             )
         })
     }
@@ -740,6 +783,111 @@ impl Db {
             let after: i64 = c.query_row("SELECT COUNT(*) FROM project_members", [], |r| r.get(0))?;
             Ok(changed || !same || before != after)
         })
+    }
+
+    /// Replaces the organizations and their people with the server's
+    /// (`my_orgs()`, `my_org_members()`). Returns true if anything changed.
+    pub fn apply_orgs(&self, orgs: &[Org], people: &[OrgMember]) -> SqlResult<bool> {
+        let before_orgs = self.list_orgs()?;
+        let before_people: Vec<OrgMember> = self.all_org_members()?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute_batch("DELETE FROM org_members; DELETE FROM organizations;")?;
+        for o in orgs {
+            tx.execute(
+                "INSERT OR REPLACE INTO organizations
+                   (id, name, logo_data, currency, default_rate, week_start, join_code, role, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![o.id, o.name, o.logo_data, o.currency, o.default_rate, o.week_start, o.join_code, o.role, o.created_at],
+            )?;
+        }
+        let mut kept = Vec::new();
+        for m in people.iter().filter(|m| orgs.iter().any(|o| o.id == m.org_id)) {
+            tx.execute(
+                "INSERT OR REPLACE INTO org_members (org_id, user_id, role, display_name, joined_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![m.org_id, m.user_id, m.role, m.display_name, m.joined_at],
+            )?;
+            kept.push(m);
+        }
+        tx.commit()?;
+        drop(conn);
+        let same_org = |a: &Org, b: &Org| {
+            (&a.id, &a.name, &a.logo_data, &a.currency, a.default_rate, a.week_start, &a.join_code, &a.role)
+                == (&b.id, &b.name, &b.logo_data, &b.currency, b.default_rate, b.week_start, &b.join_code, &b.role)
+        };
+        let same_person = |a: &OrgMember, b: &OrgMember| {
+            (&a.org_id, &a.user_id, &a.role, &a.display_name) == (&b.org_id, &b.user_id, &b.role, &b.display_name)
+        };
+        let orgs_same = before_orgs.len() == orgs.len() && orgs.iter().all(|o| before_orgs.iter().any(|b| same_org(o, b)));
+        let people_same =
+            before_people.len() == kept.len() && kept.iter().all(|&m| before_people.iter().any(|b| same_person(m, b)));
+        Ok(!(orgs_same && people_same))
+    }
+
+    /// Your organizations by name, each with how many people are in it.
+    pub fn list_orgs(&self) -> SqlResult<Vec<Org>> {
+        self.conn()
+            .prepare(
+                "SELECT o.id, o.name, o.logo_data, o.currency, o.default_rate, o.week_start, o.join_code, o.role,
+                        o.created_at, (SELECT COUNT(*) FROM org_members m WHERE m.org_id = o.id)
+                 FROM organizations o ORDER BY o.name COLLATE NOCASE",
+            )?
+            .query_map([], |r| {
+                Ok(Org {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    logo_data: r.get(2)?,
+                    currency: r.get(3)?,
+                    default_rate: r.get(4)?,
+                    week_start: r.get(5)?,
+                    join_code: r.get(6)?,
+                    role: r.get(7)?,
+                    created_at: r.get(8)?,
+                    people: r.get(9)?,
+                })
+            })?
+            .collect()
+    }
+
+    fn all_org_members(&self) -> SqlResult<Vec<OrgMember>> {
+        self.conn()
+            .prepare("SELECT org_id, user_id, role, display_name, joined_at FROM org_members")?
+            .query_map([], |r| {
+                Ok(OrgMember {
+                    org_id: r.get(0)?,
+                    user_id: r.get(1)?,
+                    role: r.get(2)?,
+                    display_name: r.get(3)?,
+                    joined_at: r.get(4)?,
+                    is_me: false,
+                })
+            })?
+            .collect()
+    }
+
+    /// The people in an organization: owner, then admins, then members, by name.
+    pub fn org_members(&self, org_id: &str) -> SqlResult<Vec<OrgMember>> {
+        let conn = self.conn();
+        let me = linked_user(&conn)?;
+        let rows = conn
+            .prepare(
+                "SELECT org_id, user_id, role, display_name, joined_at FROM org_members WHERE org_id = ?1
+                 ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, display_name COLLATE NOCASE",
+            )?
+            .query_map(params![org_id], |r| {
+                let user_id: String = r.get(1)?;
+                Ok(OrgMember {
+                    org_id: r.get(0)?,
+                    is_me: Some(&user_id) == me.as_ref(),
+                    user_id,
+                    role: r.get(2)?,
+                    display_name: r.get(3)?,
+                    joined_at: r.get(4)?,
+                })
+            })?
+            .collect();
+        rows
     }
 
     /// Who has worked on a project, for the Team tab: every member, plus one row

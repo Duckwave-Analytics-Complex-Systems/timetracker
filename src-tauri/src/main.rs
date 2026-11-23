@@ -95,6 +95,17 @@ fn main() {
             commands::cloud_set_display_name,
             commands::cloud_add_member,
             commands::cloud_remove_member,
+            commands::set_project_org,
+            commands::get_orgs,
+            commands::get_org_members,
+            commands::cloud_create_org,
+            commands::cloud_join_org,
+            commands::cloud_add_org_member,
+            commands::cloud_remove_org_member,
+            commands::cloud_set_org_role,
+            commands::cloud_update_org,
+            commands::cloud_reset_org_join_code,
+            commands::cloud_delete_org,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

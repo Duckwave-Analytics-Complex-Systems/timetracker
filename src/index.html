@@ -15,10 +15,12 @@
         <button id="settingsBtn" class="icon-btn" title="Settings">
           <svg viewBox="0 0 24 24" width="15" height="15"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
         </button>
-        <div class="brand">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <span class="brand-name">TimeTrack</span>
-        </div>
+        <!-- Workspace switcher: Personal or one of your organizations (js/widget/orgs.js) -->
+        <button id="workspaceBtn" class="brand workspace-btn" aria-haspopup="menu" aria-expanded="false" title="Change workspace">
+          <span id="workspaceBadge" class="brand-mark" aria-hidden="true"></span>
+          <span id="workspaceName" class="brand-name">TimeTrack</span>
+          <span class="workspace-caret" aria-hidden="true">▾</span>
+        </button>
       </div>
       <div class="titlebar-actions">
         <button data-window="minimize" class="icon-btn" title="Minimize">
@@ -78,6 +80,9 @@
 
     <!-- ============ Projects view ============ -->
     <section id="viewProjects" class="view" role="tabpanel">
+      <!-- A timer running in another workspace, and the organization shown (js/widget/orgs.js) -->
+      <button id="awayTimer" class="ws-bar away hidden" type="button"></button>
+      <button id="orgBar" class="ws-bar hidden" type="button"></button>
       <!-- Today: hours tracked so far today, split by project (opens Stats) -->
       <div id="todayStrip" class="today-strip" role="button" tabindex="0" aria-label="Today's hours by project. Open stats.">
         <div class="today-head">
@@ -114,8 +119,8 @@
 
       <div id="emptyState" class="empty-state hidden">
         <div class="empty-ring"></div>
-        <p>No projects yet.</p>
-        <p class="muted">Add one to start tracking billable time.</p>
+        <p id="emptyTitle">No projects yet.</p>
+        <p id="emptyHint" class="muted">Add one to start tracking billable time.</p>
       </div>
     </section>
 
@@ -230,6 +235,11 @@
         <input id="projectPeople" type="number" min="1" step="1" value="1" />
       </label>
       <p class="field-hint">Bill is multiplied by this number — e.g. 2 people pairing for 1 tracked hour bills as 2 hours.</p>
+      <label class="field hidden" id="projectOrgField">
+        <span>Workspace</span>
+        <select id="projectOrg"></select>
+      </label>
+      <p class="field-hint hidden" id="projectOrgHint"></p>
       <div class="dialog-actions">
         <button type="button" id="dialogCancel" class="btn-secondary">Cancel</button>
         <button type="submit" id="dialogSave" class="btn-primary">Save</button>
@@ -308,6 +318,71 @@
       </div>
     </form>
   </dialog>
+
+  <!-- Create an organization, or join one with its invite code (js/widget/orgs.js) -->
+  <dialog id="orgNewDialog" class="dialog">
+    <form id="orgNewForm" method="dialog" novalidate>
+      <h2 id="orgNewTitle">New organization</h2>
+      <p id="orgNewIntro" class="field-hint org-intro"></p>
+      <label class="field">
+        <span id="orgNewLabel">Name</span>
+        <input id="orgNewInput" type="text" maxlength="60" autocomplete="off" spellcheck="false" />
+      </label>
+      <p id="orgNewError" class="field-error hidden"></p>
+      <div class="dialog-actions">
+        <button type="button" id="orgNewCancel" class="btn-secondary">Cancel</button>
+        <button type="submit" id="orgNewSubmit" class="btn-primary">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- An organization: name, invite code, people (js/widget/orgs.js) -->
+  <dialog id="orgDialog" class="dialog org-dialog">
+    <form id="orgForm" method="dialog" novalidate>
+      <div class="org-head">
+        <span id="orgBadge" class="org-badge-host"></span>
+        <div class="org-head-text">
+          <h2 id="orgTitle">Organization</h2>
+          <span id="orgSub" class="org-sub"></span>
+        </div>
+      </div>
+      <label class="field hidden" id="orgNameField">
+        <span>Name</span>
+        <input id="orgName" type="text" maxlength="60" autocomplete="off" />
+      </label>
+      <div class="field hidden" id="orgCodeField">
+        <span>Invite code</span>
+        <div class="share-code"><code id="orgCode"></code>
+          <span class="org-code-actions">
+            <button type="button" id="orgCopyCode" class="btn-secondary">Copy</button>
+            <button type="button" id="orgResetCode" class="btn-secondary" title="Make a new code; the old one stops working">New</button>
+          </span>
+        </div>
+      </div>
+      <p class="field-hint hidden" id="orgCodeHint">Anyone with this code can join as a member.</p>
+      <div class="field">
+        <span>People</span>
+        <div id="orgPeople" class="org-people"></div>
+      </div>
+      <div class="field hidden" id="orgAddField">
+        <span>Add by share code</span>
+        <div class="share-code">
+          <input id="orgAddCode" type="text" autocomplete="off" spellcheck="false" placeholder="TT-XXXXXX" />
+          <button type="button" id="orgAddBtn" class="btn-secondary">Add</button>
+        </div>
+      </div>
+      <p id="orgNote" class="field-hint"></p>
+      <p class="field-hint">The owner and admins see every project in the organization and its tracked time. Members see only the projects they're added to.</p>
+      <div class="dialog-actions">
+        <button type="button" id="orgLeave" class="btn-danger">Leave</button>
+        <span class="spacer"></span>
+        <button type="button" id="orgClose" class="btn-secondary">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Workspace switcher list (js/widget/orgs.js) -->
+  <div id="workspaceMenu" class="card-menu workspace-menu hidden" role="menu"></div>
 
   <!-- Card action menu — contents are built in JS per-project (e.g. "Remove
        logo" only shows when a logo exists) and repositioned on open to stay

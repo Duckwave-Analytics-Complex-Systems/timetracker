@@ -9,7 +9,10 @@ export const api = {
   // ---- projects
   projects: () => invoke('get_projects'),
   archivedProjects: () => invoke('get_archived_projects'),
-  addProject: ({ name, hourlyRate, peopleCount }) => invoke('add_project', { name, hourlyRate, peopleCount }),
+  /** orgId: the organization to create it in; null = a personal project. */
+  addProject: ({ name, hourlyRate, peopleCount, orgId = null }) => invoke('add_project', { name, hourlyRate, peopleCount, orgId }),
+  /** Moves a project into an organization, or back to personal (null). */
+  setProjectOrg: (id, orgId) => invoke('set_project_org', { id, orgId }),
   updateProject: (id, { name, hourlyRate, peopleCount }) => invoke('update_project', { id, name, hourlyRate, peopleCount }),
   setLogo: (id, dataUrl) => invoke('set_project_logo', { id, dataUrl }),
   archiveProject: (id) => invoke('archive_project', { id }),
@@ -63,6 +66,29 @@ export const api = {
   addMember: (projectId, shareCode) => invoke('cloud_add_member', { projectId, shareCode }),
   /** Removing yourself is leaving the project. */
   removeMember: (projectId, userId) => invoke('cloud_remove_member', { projectId, userId }),
+
+  // ---- organizations (supabase/schema.sql, "organizations"). The reads are
+  // this computer's copy as of the last sync; the cloud* calls go to the
+  // server and sync before they resolve.
+  /** [{ id, name, logo_data, currency, default_rate, week_start, join_code, role, people }] */
+  orgs: () => invoke('get_orgs'),
+  /** [{ org_id, user_id, role, display_name, joined_at, is_me }], owner first. */
+  orgMembers: (orgId) => invoke('get_org_members', { orgId }),
+  /** Resolves to the new organization's id. */
+  createOrg: (name) => invoke('cloud_create_org', { name }),
+  /** Resolves to the organization's id. */
+  joinOrg: (code) => invoke('cloud_join_org', { code }),
+  /** Resolves to the added person's name. */
+  addOrgMember: (orgId, shareCode) => invoke('cloud_add_org_member', { orgId, shareCode }),
+  /** Removing yourself is leaving the organization. */
+  removeOrgMember: (orgId, userId) => invoke('cloud_remove_org_member', { orgId, userId }),
+  /** role: 'admin' | 'member', or 'owner' to hand the organization over. */
+  setOrgRole: (orgId, userId, role) => invoke('cloud_set_org_role', { orgId, userId, role }),
+  /** changes: { name?, logo_data?, currency?, default_rate?, week_start? } */
+  updateOrg: (orgId, changes) => invoke('cloud_update_org', { orgId, changes }),
+  /** Resolves to the new invite code. */
+  resetOrgJoinCode: (orgId) => invoke('cloud_reset_org_join_code', { orgId }),
+  deleteOrg: (orgId) => invoke('cloud_delete_org', { orgId }),
 };
 
 /**

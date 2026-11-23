@@ -16,3 +16,15 @@ cd src-tauri && TT_E2E_URL=http://127.0.0.1:54398 cargo test e2e -- --nocapture
 
 `postgrest_stub.py` isn't PostgREST: it covers only the requests the app makes,
 in the same form, so a real Supabase project is still worth trying.
+
+## Row-level security without Postgres (PGlite)
+
+`orgs.test.mjs` checks the organization rules (who sees and changes which
+projects, joining, leaving, roles, account deletion) directly in SQL, against
+an in-memory Postgres compiled to WebAssembly. Nothing to install but the
+package, which isn't a dependency of the app:
+
+```bash
+npm install --no-save @electric-sql/pglite
+node --test --test-concurrency=1 supabase/test/orgs.test.mjs
+```

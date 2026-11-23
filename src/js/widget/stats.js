@@ -3,6 +3,7 @@ import { niceScale } from '../core/charts.js';
 import { addDays, dayKey, escapeHtml, fmtDate, fmtHM, fmtTime, money, startOfToday } from '../core/format.js';
 import { HEATMAP_RANGES, HEAT_OPACITY, LEVELS, histogramTop, hourHeatmap, hourLabel, level, withOpenSession } from '../core/heatmap.js';
 import { bill, liveAdditions } from '../core/model.js';
+import { inWorkspace } from '../core/orgs.js';
 import { colorVar, slotOf } from './colors.js';
 import { state } from './store.js';
 
@@ -83,8 +84,10 @@ function segmentsFor(per) {
 
 // ---------------------------------------------------------------- Today strip
 
+/** Today's hours in the workspace shown (Personal or an organization). */
 export function renderToday() {
-  const per = dayMap().get(dayKey(new Date())) || new Map();
+  const here = new Set(state.projects.filter((p) => inWorkspace(p, state.workspace)).map((p) => p.id));
+  const per = dayMap((pid) => here.has(pid)).get(dayKey(new Date())) || new Map();
   const rows = rowsFor(per);
   $('todayTotal').textContent = fmtHM(rows.reduce((a, r) => a + r.secs, 0));
 
