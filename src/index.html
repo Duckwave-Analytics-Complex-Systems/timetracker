@@ -127,6 +127,8 @@
     <!-- ============ Stats view ============ -->
     <section id="viewStats" class="view hidden" role="tabpanel">
       <div class="stats-scroll">
+        <!-- An organization's dashboard, in its workspace (js/widget/org-stats.js) -->
+        <div id="orgStats" class="org-stats hidden"></div>
         <div class="stats-controls">
           <div id="scopeSeg" class="seg seg-full" role="group" aria-label="Projects">
             <button data-scope="mine">My projects</button>
@@ -284,6 +286,8 @@
             <div class="share-code"><code id="cloudCode"></code><button type="button" id="cloudCopyCode" class="btn-secondary">Copy</button></div>
           </div>
           <p class="field-hint">Give this code to a project's owner so they can add you.</p>
+          <label class="check-row"><input type="checkbox" id="cloudShareActivity" /> Show my organizations' people when I'm tracking one of their projects</label>
+          <p class="field-hint">They see it in the organization's dashboard. Never your personal projects.</p>
         </div>
         <div class="dialog-actions">
           <button type="button" id="cloudSignOut" class="btn-secondary">Sign out</button>

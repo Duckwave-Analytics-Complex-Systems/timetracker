@@ -4,7 +4,7 @@
 //! `notify` the windows when data changed. JS calls these through
 //! js/core/api.js, which is the only place `invoke` names appear.
 
-use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Org, OrgMember, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session, SessionSpan};
+use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Org, OrgEntry, OrgMember, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session, SessionSpan};
 use crate::events::{notify, Change};
 use crate::sync::{self as cloud, SyncStatus};
 use crate::{now_ms, watchdog};
@@ -342,6 +342,12 @@ pub async fn cloud_set_display_name(app: AppHandle, name: String) -> CmdResult<S
     Ok(status)
 }
 
+/// Whether org teammates see when you're tracking one of its projects.
+#[tauri::command]
+pub async fn cloud_set_share_activity(app: AppHandle, on: bool) -> CmdResult<SyncStatus> {
+    tauri::async_runtime::spawn_blocking(move || cloud::set_share_activity(&app, on)).await.map_err(msg)?
+}
+
 /// Adds someone to a project by their share code. Returns their name.
 #[tauri::command]
 pub async fn cloud_add_member(app: AppHandle, project_id: String, share_code: String) -> CmdResult<String> {
@@ -372,6 +378,18 @@ pub fn get_orgs(db: State<Db>) -> CmdResult<Vec<Org>> {
 #[tauri::command]
 pub fn get_org_members(db: State<Db>, org_id: String) -> CmdResult<Vec<OrgMember>> {
     db.org_members(&org_id).map_err(msg)
+}
+
+/// Sessions on an organization's projects from `from_ms` on, for its dashboard.
+#[tauri::command]
+pub fn get_org_entries(db: State<Db>, org_id: String, from_ms: i64) -> CmdResult<Vec<OrgEntry>> {
+    db.org_entries(&org_id, from_ms).map_err(msg)
+}
+
+/// Who in an organization is tracking one of its projects now (from the server).
+#[tauri::command]
+pub async fn cloud_org_presence(app: AppHandle, org_id: String) -> CmdResult<serde_json::Value> {
+    tauri::async_runtime::spawn_blocking(move || cloud::org_presence(&app, &org_id)).await.map_err(msg)?
 }
 
 /// Creates an organization with you as its owner. Returns its id.

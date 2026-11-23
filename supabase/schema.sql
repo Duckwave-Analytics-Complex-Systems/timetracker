@@ -209,6 +209,8 @@ alter table public.profiles add column if not exists work_start text not null de
 alter table public.profiles add column if not exists work_end text not null default '18:00';
 alter table public.profiles add column if not exists default_rate double precision;
 alter table public.profiles add column if not exists updated_at timestamptz not null default clock_timestamp();
+-- Organizations: whether teammates see when you're tracking one of its projects (org_presence()).
+alter table public.profiles add column if not exists share_activity boolean not null default true;
 
 -- Time someone tracked stays on a shared project after they delete their
 -- account (see delete_my_account), so it must not go with their user row. The
@@ -854,6 +856,33 @@ begin
   where id = p_org_id;
 end $$;
 
+-- An organization's people right now, for its dashboard. Any member may ask.
+-- * running / started_at: tracking one of the organization's projects (never a
+--   personal one), unless they turned share_activity off. project_id and
+--   project_name only if you can see that project too.
+-- * weekly_goal_hours: only for the owner and admins (everyone's), or your own.
+create or replace function public.org_presence(p_org_id text)
+returns table (user_id uuid, display_name text, role text, weekly_goal_hours double precision,
+               running boolean, project_id text, project_name text, started_at bigint)
+language sql stable security definer set search_path = '' as $$
+  with people as (
+    select m.user_id, m.role, pr.display_name, pr.weekly_goal_hours, t.started_at, p.id as pid, p.name as pname,
+           coalesce(t.running and pr.share_activity and p.org_id = p_org_id and not p.deleted, false) as busy
+    from public.org_members m
+    left join public.profiles pr on pr.id = m.user_id
+    left join public.timers t on t.user_id = m.user_id
+    left join public.projects p on p.id = t.project_id
+    where m.org_id = p_org_id and public.is_org_member(p_org_id)
+  )
+  select x.user_id, coalesce(x.display_name, ''), x.role,
+         case when public.is_org_admin(p_org_id) or x.user_id = auth.uid() then x.weekly_goal_hours end,
+         x.busy,
+         case when x.busy and public.is_project_member(x.pid) then x.pid end,
+         case when x.busy and public.is_project_member(x.pid) then x.pname end,
+         case when x.busy then x.started_at end
+  from people x
+$$;
+
 -- An owner or admin replaces the join code, so the old one stops working.
 create or replace function public.reset_org_join_code(p_org_id text) returns text
 language plpgsql security definer set search_path = '' as $$
@@ -902,7 +931,7 @@ declare
   k text;
   allowed constant text[] := array[
     'display_name', 'avatar_kind', 'avatar_preset', 'avatar_color', 'avatar_data', 'currency', 'week_start',
-    'weekly_goal_hours', 'work_days', 'work_start', 'work_end', 'default_rate'];
+    'weekly_goal_hours', 'work_days', 'work_start', 'work_end', 'default_rate', 'share_activity'];
   hhmm constant text := '^([01][0-9]|2[0-3]):[0-5][0-9]$';
 begin
   if jsonb_typeof(p_changes) is distinct from 'object' then
@@ -991,7 +1020,12 @@ begin
     end if;
   end if;
 
+  if p_changes ? 'share_activity' then
+    p.share_activity := coalesce((p_changes ->> 'share_activity')::boolean, true);
+  end if;
+
   update public.profiles set
+    share_activity = p.share_activity,
     display_name = p.display_name, avatar_kind = p.avatar_kind, avatar_preset = p.avatar_preset,
     avatar_color = p.avatar_color, avatar_data = p.avatar_data, currency = p.currency,
     week_start = p.week_start, weekly_goal_hours = p.weekly_goal_hours, work_days = p.work_days,
@@ -1105,7 +1139,7 @@ begin
     'is_org_member(text)', 'is_org_admin(text)', 'can_manage_project(text)', 'add_member_by_id(text, uuid)',
     'my_orgs()', 'my_org_members()', 'create_org(text)', 'join_org(text)', 'add_org_member(text, text)',
     'remove_org_member(text, uuid)', 'set_org_role(text, uuid, text)', 'update_org(text, jsonb)',
-    'reset_org_join_code(text)', 'delete_org(text)'
+    'reset_org_join_code(text)', 'delete_org(text)', 'org_presence(text)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);

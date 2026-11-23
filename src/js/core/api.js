@@ -60,6 +60,8 @@ export const api = {
   cloudSignOut: () => invoke('cloud_sign_out'),
   cloudSyncNow: () => invoke('cloud_sync_now'),
   cloudSetDisplayName: (name) => invoke('cloud_set_display_name', { name }),
+  /** Whether org teammates see when you're tracking one of its projects. */
+  cloudSetShareActivity: (on) => invoke('cloud_set_share_activity', { on }),
 
   // ---- sharing
   /** Resolves to the added person's name. */
@@ -91,6 +93,10 @@ export const api = {
   /** Resolves to the new invite code. */
   resetOrgJoinCode: (orgId) => invoke('cloud_reset_org_join_code', { orgId }),
   deleteOrg: (orgId) => invoke('cloud_delete_org', { orgId }),
+  /** This computer's sessions on the organization's projects from fromMs on: [{ project_id, user_id, start_ts, seconds }] */
+  orgEntries: (orgId, fromMs) => invoke('get_org_entries', { orgId, fromMs }),
+  /** From the server: [{ user_id, display_name, role, weekly_goal_hours, running, project_id, project_name, started_at }] */
+  orgPresence: (orgId) => invoke('cloud_org_presence', { orgId }),
 };
 
 /**

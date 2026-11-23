@@ -206,3 +206,52 @@ test('personal shared projects keep working as before', async () => {
   await as(db, 'a', 'select delete_my_account()');
   assert.equal((await orgOf(db, 'p')).user_id, U('b'), 'old heir logic still works');
 });
+
+// ---------------------------------------------------------------- presence (Phase 3)
+
+const timer = (db, c, projectId) => as(db, c,
+  `select push_timer('start', $1, null, ${Date.now()}, null, 'dev')`, [projectId]);
+const presence = async (db, c, org) =>
+  Object.fromEntries((await as(db, c, 'select * from org_presence($1)', [org])).map((r) => [r.user_id, r]));
+
+test('org_presence: who is tracking an org project, and what you may see of it', async () => {
+  const { db, org } = await setup();
+  await as(db, 'a', `insert into projects (id, name, org_id) values ('p1', 'Secret', $1)`, [org]);
+  await as(db, 'b', `insert into projects (id, name) values ('mine', 'Personal')`);
+  await as(db, 'a', `select update_profile('{"weekly_goal_hours": 30}')`);
+  await as(db, 'b', `select update_profile('{"weekly_goal_hours": 20}')`);
+  await timer(db, 'a', 'p1');      // an org project
+  await timer(db, 'b', 'mine');    // a personal one: never shown
+
+  const forB = await presence(db, 'b', org);
+  assert.equal(Object.keys(forB).length, 3);
+  assert.equal(forB[U('a')].running, true, 'a is tracking an org project');
+  assert.equal(forB[U('a')].project_name, null, "b isn't in p1: no name");
+  assert.ok(forB[U('a')].started_at > 0);
+  assert.equal(forB[U('b')].running, false, 'personal projects stay private');
+  assert.equal(forB[U('a')].weekly_goal_hours, null, "a member doesn't see others' goals");
+  assert.equal(forB[U('b')].weekly_goal_hours, 20, 'but sees their own');
+
+  const forC = await presence(db, 'c', org); // admin
+  assert.equal(forC[U('a')].project_name, 'Secret', 'admins see org projects');
+  assert.equal(forC[U('b')].weekly_goal_hours, 20);
+  assert.equal(forC[U('a')].weekly_goal_hours, 30);
+
+  assert.equal((await as(db, 'd', 'select * from org_presence($1)', [org])).length, 0, 'outsiders get nothing');
+});
+
+test('org_presence: share_activity off hides you', async () => {
+  const { db, org } = await setup();
+  await as(db, 'a', `insert into projects (id, name, org_id) values ('p1', 'P1', $1)`, [org]);
+  await timer(db, 'a', 'p1');
+  await as(db, 'a', `select update_profile('{"share_activity": false}')`);
+  const forC = await presence(db, 'c', org);
+  assert.equal(forC[U('a')].running, false);
+  assert.equal(forC[U('a')].started_at, null);
+  assert.equal(forC[U('a')].project_id, null);
+  // The phones send it as 1/0 (SQLite has no booleans).
+  await as(db, 'a', `select update_profile('{"share_activity": 1}')`);
+  assert.equal((await presence(db, 'c', org))[U('a')].running, true);
+  const [{ share_activity }] = await as(db, 'a', 'select share_activity from ensure_profile()');
+  assert.equal(share_activity, true);
+});

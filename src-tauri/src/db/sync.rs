@@ -200,6 +200,16 @@ pub struct OrgMember {
     pub is_me: bool,
 }
 
+/// A session on one of an organization's projects, for its dashboard.
+/// `user_id` is `None` for your own (as in time_entries).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OrgEntry {
+    pub project_id: String,
+    pub user_id: Option<String>,
+    pub start_ts: i64,
+    pub seconds: i64,
+}
+
 /// A row of the "Hours by person" table. `user_id` is `None` for time tracked
 /// by people who have since left the project, added up as one row.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -862,6 +872,21 @@ impl Db {
                     joined_at: r.get(4)?,
                     is_me: false,
                 })
+            })?
+            .collect()
+    }
+
+    /// Sessions on the organization's projects that this device has, started at
+    /// or after `from_ms`.
+    pub fn org_entries(&self, org_id: &str, from_ms: i64) -> SqlResult<Vec<OrgEntry>> {
+        self.conn()
+            .prepare(
+                "SELECT e.project_id, e.user_id, e.start_ts, e.seconds
+                 FROM time_entries e JOIN projects p ON p.id = e.project_id
+                 WHERE p.org_id = ?1 AND e.start_ts >= ?2",
+            )?
+            .query_map(params![org_id, from_ms], |r| {
+                Ok(OrgEntry { project_id: r.get(0)?, user_id: r.get(1)?, start_ts: r.get(2)?, seconds: r.get(3)? })
             })?
             .collect()
     }

@@ -28,6 +28,7 @@ function render() {
   if (s.profile) {
     $('cloudCode').textContent = s.profile.share_code;
     if (document.activeElement !== $('cloudName')) $('cloudName').value = s.profile.display_name;
+    $('cloudShareActivity').checked = s.profile.share_activity !== false;
   }
   const err = $('cloudError');
   err.textContent = s.last_error || '';
@@ -115,6 +116,16 @@ $('cloudName').addEventListener('change', async () => {
     render();
   } catch (err) {
     alert(String(err));
+  }
+});
+
+$('cloudShareActivity').addEventListener('change', async (e) => {
+  try {
+    status = await api.cloudSetShareActivity(e.target.checked);
+    render();
+  } catch (err) {
+    alert(String(err));
+    render();
   }
 });
 

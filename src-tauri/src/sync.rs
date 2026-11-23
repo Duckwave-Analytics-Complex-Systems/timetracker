@@ -79,6 +79,14 @@ struct Session {
 pub struct Profile {
     pub display_name: String,
     pub share_code: String,
+    /// Organizations: teammates see when you're tracking one of its projects.
+    /// On unless turned off (and for a profile stored before it existed).
+    #[serde(default = "on")]
+    pub share_activity: bool,
+}
+
+fn on() -> bool {
+    true
 }
 
 /// What the Settings panel shows.
@@ -624,6 +632,14 @@ pub fn set_display_name(app: &AppHandle, name: &str) -> SyncResult<SyncStatus> {
     Ok(status(app))
 }
 
+/// Whether org teammates see when you're tracking one of its projects.
+pub fn set_share_activity(app: &AppHandle, on: bool) -> SyncResult<SyncStatus> {
+    as_signed_in(app, |db, rest| {
+        store(db, K_PROFILE, Some(&rest.profile("update_profile", json!({ "p_changes": { "share_activity": on } }))?))
+    })?;
+    Ok(status(app))
+}
+
 pub fn add_member(app: &AppHandle, project_id: &str, share_code: &str) -> SyncResult<String> {
     run_cycle(app); // the server must have the project first
     let name = as_signed_in(app, |_, rest| {
@@ -698,6 +714,12 @@ pub fn update_org(app: &AppHandle, org_id: &str, changes: Value) -> SyncResult<(
 /// A new invite code; the old one stops working. Returns it.
 pub fn reset_org_join_code(app: &AppHandle, org_id: &str) -> SyncResult<String> {
     org_call(app, "reset_org_join_code", json!({ "p_org_id": org_id })).map(text)
+}
+
+/// Who in the organization is tracking one of its projects now, and the
+/// weekly goals you may see (`org_presence()`). Read straight from the server.
+pub fn org_presence(app: &AppHandle, org_id: &str) -> SyncResult<Value> {
+    as_signed_in(app, |_, rest| rest.rpc("org_presence", json!({ "p_org_id": org_id })))
 }
 
 /// Deletes the organization (owner). Its projects become personal projects of their owners.

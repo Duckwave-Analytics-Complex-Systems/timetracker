@@ -517,3 +517,30 @@
 }
 .org-logo-preview { display: inline-flex; align-items: center; font-size: 12px; }
 .org-logo-preview .muted { color: var(--text-faint); }
+
+/* Organization dashboard in the Stats tab (js/widget/org-stats.js) */
+.org-stats { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+.os-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.os-head h2 { font-family: var(--font-display); font-size: 14px; margin: 0; }
+.os-head .seg button { padding: 4px 8px; font-size: 11px; }
+.os-sub { margin: -4px 0 0; font-size: 11px; color: var(--text-muted); }
+.os-tiles { grid-template-columns: 1fr 1fr; }
+.os-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.os-person { display: flex; flex-direction: column; gap: 5px; padding: 5px 0; }
+.os-name { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-name small { display: block; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.os-name .muted { color: var(--text-muted); }
+.os-fig { font-size: 12px; color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; flex-shrink: 0; }
+.os-fig small { display: block; font-size: 11px; }
+.os-track { flex: 1; height: 5px; border-radius: 3px; background: var(--surface-selected); overflow: hidden; }
+.os-track i { display: block; height: 100%; background: var(--accent-running); border-radius: 3px; }
+.os-track i.full { background: var(--accent-earnings); }
+.os-pct { width: 36px; text-align: right; font-size: 11px; color: var(--text-muted); }
+.os-empty { margin: 2px 0; font-size: 12px; color: var(--text-muted); }
+.status-dot.live { background: var(--accent-running); box-shadow: 0 0 5px 1px var(--accent-running); flex-shrink: 0; }
+.os-export { align-self: flex-start; }
+.os-divider { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.os-divider::before, .os-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-hair); }
+.check-row { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-primary); line-height: 1.4; margin-bottom: 8px; cursor: pointer; }
+.check-row input { margin-top: 2px; accent-color: var(--accent-running); }
+.os-person > .os-track { flex: none; }
