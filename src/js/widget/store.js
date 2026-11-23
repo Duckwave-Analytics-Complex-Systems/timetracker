@@ -4,10 +4,6 @@
 import { api } from '../core/api.js';
 import { addDays, dayKey, startOfToday } from '../core/format.js';
 import { HEATMAP_FETCH_DAYS } from '../core/heatmap.js';
-import { setOrgCurrencies } from '../core/money.js';
-import { PERSONAL, validWorkspace } from '../core/orgs.js';
-
-const WORKSPACE_STORAGE_KEY = 'timetrack:workspace';
 
 export const DAILY_FETCH_DAYS = 90; // covers the longest Stats range (12 weeks)
 
@@ -48,9 +44,7 @@ export async function refresh() {
     api.orgs(),
   ]);
   if (request !== latestRequest) return; // a newer refresh already landed
-  const workspace = validWorkspace(localStorage.getItem(WORKSPACE_STORAGE_KEY) || PERSONAL, orgs);
-  setOrgCurrencies(orgs); // before anything draws money
-  Object.assign(state, { projects, archived, dailyRows, spans, orgs, workspace });
+  Object.assign(state, { projects, archived, dailyRows, spans });
   listeners.forEach((fn) => fn());
 }
 
