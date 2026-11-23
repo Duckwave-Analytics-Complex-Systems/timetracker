@@ -4,7 +4,8 @@
 // later. Earnings and the effective hourly rate come from `earned()` in
 // core/model.js, so the Archive shows the same numbers.
 import { api } from '../core/api.js';
-import { escapeHtml, fmtHM, money } from '../core/format.js';
+import { escapeHtml, fmtHM } from '../core/format.js';
+import { moneyOf } from '../core/money.js';
 import { bill, effectiveRate, earned, liveSeconds } from '../core/model.js';
 import { act } from './store.js';
 
@@ -27,8 +28,8 @@ function renderNumbers() {
   const rate = effectiveRate(preview, seconds);
   $('endTime').textContent = fmtHM(seconds);
   $('endEarnedLabel').textContent = preview.final_payment ? 'Paid' : 'Billed';
-  $('endEarned').textContent = money(amount);
-  $('endRate').textContent = rate != null ? `${money(rate)}/h` : '—';
+  $('endEarned').textContent = moneyOf(p, amount);
+  $('endRate').textContent = rate != null ? `${moneyOf(p, rate)}/h` : '—';
 }
 
 /**
@@ -49,7 +50,7 @@ export function openEndDialog(p, mode = 'end') {
   $('endPaymentField').classList.toggle('hidden', !askPayment);
   $('endPaymentHint').classList.toggle('hidden', !askPayment);
   $('endPaymentHint').textContent = hasRate
-    ? `Replaces the hourly bill (${money(bill(p, seconds))}) in the Archive.`
+    ? `Replaces the hourly bill (${moneyOf(p, bill(p, seconds))}) in the Archive.`
     : 'This project has no hourly rate. Enter what it paid to see its cost per hour in the Archive.';
   paymentInput.value = p.final_payment > 0 ? p.final_payment : '';
   $('endSubmit').textContent = mode === 'end' ? 'End project' : 'Save';

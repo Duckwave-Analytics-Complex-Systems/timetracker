@@ -5,7 +5,8 @@
 // to whichever tab is visible. Reloads on every `data-changed` event, so
 // edits made here, in the widget, or in another window all show up.
 import { api, onDataChanged } from '../core/api.js';
-import { escapeHtml, fmtDate, fmtHMS, fmtTime, money } from '../core/format.js';
+import { escapeHtml, fmtDate, fmtHMS, fmtTime } from '../core/format.js';
+import { moneyOf, setOrgCurrencies } from '../core/money.js';
 import { bill, billedPeople, effectiveRate, liveSeconds } from '../core/model.js';
 import { appWindow, getAppVersion, saveDialog, writeTextFile } from '../core/tauri.js';
 import { setupTitlebar } from '../core/titlebar.js';
@@ -42,6 +43,7 @@ let appVersion = '';
 async function load() {
   try {
     [detail, cloud, orgs] = await Promise.all([api.projectDetail(PROJECT_ID), api.cloudStatus(), api.orgs().catch(() => [])]);
+    setOrgCurrencies(orgs); // before anything draws money
     const orgId = detail.project.org_id;
     orgPeople = orgId && orgs.some((o) => o.id === orgId) ? await api.orgMembers(orgId).catch(() => []) : [];
   } catch (err) {
@@ -87,7 +89,7 @@ function renderHeader(live, m) {
     : `<div class="proj-logo logo-placeholder">${escapeHtml((p.name[0] || '?').toUpperCase())}</div>`;
 
   const meta = [pill(HEALTH[m.health].tone, HEALTH[m.health].label)];
-  if (p.hourly_rate > 0) meta.push(`<span class="earnings">${money(p.hourly_rate)}/h${billedPeople(p) > 1 ? ` × ${billedPeople(p)}` : ''}</span>`);
+  if (p.hourly_rate > 0) meta.push(`<span class="earnings">${moneyOf(p, p.hourly_rate)}/h${billedPeople(p) > 1 ? ` × ${billedPeople(p)}` : ''}</span>`);
   const org = orgs.find((o) => o.id === p.org_id);
   if (org) meta.push(`<span>In ${escapeHtml(org.name)}${p.managed_only ? ' (as admin)' : ''}</span>`);
   if (p.shared) meta.push(`<span>${p.is_owner && !p.managed_only ? 'Shared by you' : 'Shared with you'}</span>`);
@@ -95,7 +97,7 @@ function renderHeader(live, m) {
   if (p.archived && p.archived_at) meta.push(`<span>Ended ${fmtDate(new Date(p.archived_at))}</span>`);
   if (p.final_payment > 0) {
     const rate = effectiveRate(p, p.total_seconds);
-    meta.push(`<span class="earnings">Paid ${money(p.final_payment)}${rate != null ? ` · ${money(rate)}/h` : ''}</span>`);
+    meta.push(`<span class="earnings">Paid ${moneyOf(p, p.final_payment)}${rate != null ? ` · ${moneyOf(p, rate)}/h` : ''}</span>`);
   }
   $('projMeta').innerHTML = meta.join('<span class="sep">·</span>');
 
@@ -122,7 +124,7 @@ function renderTimer() {
   $('projTimer').classList.toggle('running', p.is_running);
   $('timerBtn').textContent = p.is_running ? 'Pause' : 'Start';
   const parts = [p.is_running ? `Running since ${fmtTime(p.run_started_at)}` : 'Paused'];
-  if (p.hourly_rate > 0) parts.push(money(bill(p, secs)));
+  if (p.hourly_rate > 0) parts.push(moneyOf(p, bill(p, secs)));
   $('timerSub').textContent = parts.join(' · ');
 }
 

@@ -198,7 +198,10 @@ async function renderOrgDialog() {
   $('orgBadge').innerHTML = badge(org);
   $('orgTitle').textContent = org.name;
   $('orgSub').textContent = `${ROLE[org.role]} · ${people(members.length)}`;
-  for (const id of ['orgNameField', 'orgRateField', 'orgRateHint', 'orgLogoField']) $(id).classList.toggle('hidden', !admin);
+  for (const id of ['orgNameField', 'orgRateField', 'orgRateHint', 'orgCurrencyField', 'orgCurrencyHint', 'orgLogoField']) {
+    $(id).classList.toggle('hidden', !admin);
+  }
+  if (admin && document.activeElement !== $('orgCurrency')) $('orgCurrency').value = org.currency || '';
   if (admin && document.activeElement !== $('orgName')) $('orgName').value = org.name;
   if (admin && document.activeElement !== $('orgRate')) $('orgRate').value = org.default_rate > 0 ? org.default_rate : '';
   $('orgLogoPreview').innerHTML = org.logo_data ? badge(org) : '<span class="muted">None</span>';
@@ -244,6 +247,16 @@ $('orgRate').addEventListener('change', async () => {
   const v = parseFloat($('orgRate').value);
   const rate = Number.isFinite(v) && v > 0 ? v : null;
   if (await orgAction(() => api.updateOrg(openOrgId, { default_rate: rate }))) renderOrgDialog();
+});
+$('orgCurrency').addEventListener('change', async () => {
+  const code = $('orgCurrency').value.replace(/[^a-z]/gi, '').toUpperCase();
+  let known = !code;
+  try { known ||= !!new Intl.NumberFormat(undefined, { style: 'currency', currency: code }); } catch { /* unknown code */ }
+  if (!known || (code && code.length !== 3)) {
+    note('A currency is a 3-letter code, like USD or EUR.');
+    return;
+  }
+  if (await orgAction(() => api.updateOrg(openOrgId, { currency: code || null }))) renderOrgDialog();
 });
 $('orgLogoBtn').addEventListener('click', () => {
   $('orgLogoInput').value = '';

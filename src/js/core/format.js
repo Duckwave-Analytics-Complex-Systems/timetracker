@@ -21,6 +21,11 @@ export function setFormatCurrency(code) {
   moneyFmt = null;
 }
 
+/** Your currency code, as set by setFormatCurrency() (undefined = "$" + number). */
+export function formatCurrency() {
+  return CURRENCY;
+}
+
 export function setWeekStart(day) {
   WEEK_START = day === 0 ? 0 : 1;
 }

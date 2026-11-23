@@ -544,3 +544,4 @@
 .check-row { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-primary); line-height: 1.4; margin-bottom: 8px; cursor: pointer; }
 .check-row input { margin-top: 2px; accent-color: var(--accent-running); }
 .os-person > .os-track { flex: none; }
+#orgCurrency { text-transform: uppercase; }

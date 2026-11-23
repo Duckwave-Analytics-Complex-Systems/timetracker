@@ -5,7 +5,8 @@
 // are in report-style.js and scoped under .rpt, so the exported file needs
 // nothing else (no fonts, scripts or network).
 import { burnupSvg, donutSvg, ganttSvg, weeklyBarsSvg } from '../core/charts.js';
-import { addDays, dayKey, daysBetween, escapeHtml, fmtDate, fmtHours, money, pct } from '../core/format.js';
+import { addDays, dayKey, daysBetween, escapeHtml, fmtDate, fmtHours, pct } from '../core/format.js';
+import { moneyOf } from '../core/money.js';
 import { bill, billedPeople } from '../core/model.js';
 import { burnupLegendHtml, featureTableHtml, healthPill, kpiTilesHtml, notesHtml, phaseTableHtml, progressBarsHtml, sessionTableHtml, memberTableHtml } from './blocks.js';
 import { burnupSeries, isMilestone, phaseStatusLabel, sessionRows, summarySentence, weeklySeries } from './metrics.js';
@@ -46,11 +47,11 @@ function billingHtml(project, m, totalSeconds) {
   const per = (hours) => (hours == null ? null : bill(project, hours * 3600));
   const people = billedPeople(project);
   return `<div class="rpt-stats">
-    ${stat('Rate', `${money(project.hourly_rate)}/h`, people > 1 ? `× ${people} people` : '1 person')}
-    ${stat('Billed to date', money(bill(project, totalSeconds)), fmtHours(m.spentH))}
-    ${stat('Budget value', money(per(m.budgetH)), m.budgetH ? fmtHours(m.budgetH) : 'no budget set')}
-    ${stat('Remaining budget value', m.remainingH == null ? '—' : money(per(m.remainingH)), m.remainingH < 0 ? 'over budget' : '')}
-    ${stat('Projected total', money(per(m.eacH)), m.eacH != null ? 'at current efficiency' : '')}
+    ${stat('Rate', `${moneyOf(project, project.hourly_rate)}/h`, people > 1 ? `× ${people} people` : '1 person')}
+    ${stat('Billed to date', moneyOf(project, bill(project, totalSeconds)), fmtHours(m.spentH))}
+    ${stat('Budget value', moneyOf(project, per(m.budgetH)), m.budgetH ? fmtHours(m.budgetH) : 'no budget set')}
+    ${stat('Remaining budget value', m.remainingH == null ? '—' : moneyOf(project, per(m.remainingH)), m.remainingH < 0 ? 'over budget' : '')}
+    ${stat('Projected total', moneyOf(project, per(m.eacH)), m.eacH != null ? 'at current efficiency' : '')}
   </div>`;
 }
 

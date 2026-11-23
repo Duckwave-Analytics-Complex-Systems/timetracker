@@ -359,6 +359,11 @@
         <input id="orgRate" type="number" min="0" step="0.01" placeholder="0.00" />
       </label>
       <p class="field-hint hidden" id="orgRateHint">New projects in this organization start with it. Empty: each person's own.</p>
+      <label class="field hidden" id="orgCurrencyField">
+        <span>Currency</span>
+        <input id="orgCurrency" type="text" maxlength="3" autocomplete="off" spellcheck="false" placeholder="Each person's own" />
+      </label>
+      <p class="field-hint hidden" id="orgCurrencyHint">Its projects bill in it, for everyone. Empty: each person sees their own currency.</p>
       <div class="field hidden" id="orgLogoField">
         <span>Logo</span>
         <div class="share-code">

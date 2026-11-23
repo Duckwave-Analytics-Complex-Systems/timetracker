@@ -1,7 +1,8 @@
 // Projects tab: the project cards of the workspace shown (Personal or an
 // organization, see orgs.js), their ⋯ menu, the add/edit dialog and logo upload.
 import { api } from '../core/api.js';
-import { escapeHtml, fmtHMS, money } from '../core/format.js';
+import { escapeHtml, fmtHMS } from '../core/format.js';
+import { moneyOf } from '../core/money.js';
 import { bill, billedPeople, liveSeconds } from '../core/model.js';
 import { PERSONAL, inWorkspace } from '../core/orgs.js';
 import { toggleTimer } from '../core/session-notes.js';
@@ -77,7 +78,7 @@ function cardHtml(p, seconds) {
         <div class="card-sub">
           <span class="status-dot"></span>
           <span>${p.is_running ? (p.run_device ? 'Running on phone' : 'Running') : 'Paused'}</span>
-          ${p.hourly_rate ? `<span>·</span><span class="earnings">${money(bill(p, seconds))}</span>` : ''}
+          ${p.hourly_rate ? `<span>·</span><span class="earnings">${moneyOf(p, bill(p, seconds))}</span>` : ''}
           ${billedPeople(p) > 1 ? `<span>·</span><span class="people-badge">×${billedPeople(p)}</span>` : ''}
           ${p.shared ? '<span>·</span><span class="people-badge">Shared</span>' : ''}
         </div>
