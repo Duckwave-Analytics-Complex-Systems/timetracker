@@ -107,6 +107,38 @@ other way around). Build each target on its own OS, or use a CI matrix
 - The NSIS `.exe` is a one-click installer that installs per user, with no
   admin prompt (`nsis.installMode: currentUser` in `tauri.conf.json`).
 
+## Releasing a new version
+
+TimeTrack doesn't update itself. Each running copy reads `version.json` from
+this repository's `main` branch (at start, then every 6 hours). When a newer
+version is listed, the widget shows a bar with a **Download** button that opens
+`download_url` in the browser. The user closes TimeTrack and runs the new
+installer, which upgrades in place. The data folder (see
+[Data location](#data-location)) is separate from the program, so projects and
+hours are kept. The app updates the database itself when it next starts.
+
+To release:
+
+1. Raise the version, identically, in `package.json`, `src-tauri/Cargo.toml`
+   and `src-tauri/tauri.conf.json`. It must be higher than the last release,
+   or the Windows installers won't upgrade. MSI limits it to
+   `0-255.0-255.0-65535`.
+2. `npm run build` on each OS and publish the installers on the download page.
+   On Windows, offer only the NSIS `.exe` to the public: mixing it with the
+   `.msi` on one computer gives two separate installs.
+3. Only then, edit `version.json` and push it to `main`:
+
+   | Field | Meaning |
+   |---|---|
+   | `latest` | The version just published. |
+   | `notes` | Shown under "What's new". Plain text; line breaks are kept. |
+   | `download_url` | The page the Download button opens. Must be `https://`. |
+   | `min_supported` | Optional. Older versions stop cloud sync until updated (local tracking keeps working, changes stay queued). Raise it when a server change in `supabase/schema.sql` would break older apps. |
+
+Installs only learn about updates from versions that have this check
+(6.2.0 on). The manifest's address is built into each install, so keep
+`version.json` published here even if the website also hosts one.
+
 ## Data location
 
 - Linux: `~/.local/share/com.timetrack.widget/timetrack.sqlite3`
@@ -249,6 +281,9 @@ timetrack/
 
 ### Unreleased: cloud sync
 
+- **Update notice**: the widget tells you when a new version is available
+  and opens the download page. Settings shows the version and a "Check for
+  updates" button. See [Releasing a new version](#releasing-a-new-version).
 - Optional sync through your own Supabase project, between computers and
   with the companion Android app. See [Cloud sync](#cloud-sync).
 - The widget shows when a timer is running on another device.
