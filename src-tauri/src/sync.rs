@@ -493,6 +493,8 @@ fn cycle(db: &Db, cfg: &Config, session: Session) -> SyncResult<bool> {
     Ok(changed)
 }
 
+pub const UPDATE_REQUIRED: &str = "This version of TimeTrack is no longer supported by cloud sync. Update to keep syncing; your changes are kept until then.";
+
 /// One sync cycle, if an account is linked. Updates the status and tells the
 /// windows if anything arrived.
 pub fn run_cycle(app: &AppHandle) {
@@ -502,7 +504,13 @@ pub fn run_cycle(app: &AppHandle) {
     let (Some(cfg), Some(session)) = (load::<Config>(&db, K_CONFIG), load::<Session>(&db, K_SESSION)) else {
         return;
     };
-    let result = cycle(&db, &cfg, session);
+    // An unsupported version could write rows the server no longer expects.
+    // Changes stay queued and go up after the update.
+    let result = if crate::updates::sync_blocked(app) {
+        Err(UPDATE_REQUIRED.to_string())
+    } else {
+        cycle(&db, &cfg, session)
+    };
     {
         let mut s = state.status.lock().unwrap();
         match &result {

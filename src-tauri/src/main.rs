@@ -9,12 +9,14 @@
 //! - `watchdog`  sleep detection + liveness stamp (background thread)
 //! - `shutdown`  pausing the timer on every way the app can end
 //! - `sync`      optional cloud sync with Supabase (background thread)
+//! - `updates`   "a new version is available" (version.json manifest)
 
 mod commands;
 mod db;
 mod events;
 mod shutdown;
 mod sync;
+mod updates;
 mod watchdog;
 
 use std::sync::Mutex;
@@ -42,6 +44,7 @@ fn main() {
             app.manage(commands::Recovered(Mutex::new(recovered)));
             app.manage(watchdog::Watchdog::new(now_ms()));
             watchdog::spawn(app.handle().clone());
+            app.manage(updates::UpdateState::default());
             app.manage(sync::SyncState::default());
             sync::spawn(app.handle().clone());
             shutdown::install_signal_handlers(app.handle().clone());
@@ -95,6 +98,25 @@ fn main() {
             commands::cloud_set_display_name,
             commands::cloud_add_member,
             commands::cloud_remove_member,
+            commands::set_project_org,
+            commands::get_orgs,
+            commands::get_org_members,
+            commands::get_org_entries,
+            commands::cloud_org_presence,
+            commands::get_shared_sessions,
+            commands::cloud_share_session,
+            commands::cloud_join_session,
+            commands::cloud_decline_session,
+            commands::cloud_create_org,
+            commands::cloud_join_org,
+            commands::cloud_add_org_member,
+            commands::cloud_remove_org_member,
+            commands::cloud_set_org_role,
+            commands::cloud_update_org,
+            commands::cloud_reset_org_join_code,
+            commands::cloud_delete_org,
+            commands::check_for_update,
+            commands::open_update_download,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

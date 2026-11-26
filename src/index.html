@@ -68,6 +68,26 @@
         <input type="color" id="secondaryColorInput" class="color-input" />
       </div>
       <button id="resetColorsBtn" class="settings-action subtle">Reset colors</button>
+      <div class="settings-divider"></div>
+      <!-- Version and update check (js/widget/updates.js) -->
+      <div class="settings-row">
+        <span>Version <span id="appVersion" class="muted"></span></span>
+        <button id="checkUpdateBtn" class="link-btn" type="button">Check for updates</button>
+      </div>
+      <div id="updateCheckStatus" class="update-check-status hidden"></div>
+    </div>
+
+    <!-- "A new version is available" (js/widget/updates.js) -->
+    <div id="updateBar" class="update-bar hidden" role="status">
+      <div class="update-bar-row">
+        <span class="update-dot" aria-hidden="true"></span>
+        <span id="updateText" class="update-text"></span>
+        <button id="updateNotesBtn" class="link-btn hidden" type="button" aria-expanded="false">What's new</button>
+        <button id="updateDownloadBtn" class="update-download" type="button">Download</button>
+        <button id="updateLaterBtn" class="notice-close" type="button" title="Remind me later">×</button>
+      </div>
+      <p id="updateNotes" class="update-notes hidden"></p>
+      <p class="update-hint">Close TimeTrack, then run the installer. Your projects and hours are kept.</p>
     </div>
 
     <nav class="tabs" role="tablist" aria-label="Views">

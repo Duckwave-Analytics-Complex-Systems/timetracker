@@ -15,6 +15,7 @@ import { initCloud, refreshCloud } from './cloud.js';
 import { initSettings } from './settings.js';
 import { chartHover, renderStats, renderToday, resetChartHover, resetSelection } from './stats.js';
 import { onRefresh, refresh, state } from './store.js';
+import { initUpdates } from './updates.js';
 
 const TICK_MS = 1000;
 const WAKE_GAP_MS = 5000; // our own tick was late by this much: we were probably asleep
@@ -109,6 +110,7 @@ setupTitlebar($('titlebar'));
 useSharedTheme();
 initSettings();
 initCloud();
+initUpdates();
 refresh()
   .then(showRecoveredRuns)
   .catch((err) => console.error('boot failed', err));
