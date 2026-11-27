@@ -856,7 +856,7 @@ impl Db {
 
     /// Replaces the shared sessions with the server's. Returns true if anything changed.
     pub fn apply_sessions(&self, sessions: &[SharedSession]) -> SqlResult<bool> {
-        let before = self.list_sessions()?;
+        let before = self.list_shared_sessions()?;
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM shared_sessions", [])?;
@@ -874,7 +874,7 @@ impl Db {
     }
 
     /// The shared sessions as of the last sync, oldest first.
-    pub fn list_sessions(&self) -> SqlResult<Vec<SharedSession>> {
+    pub fn list_shared_sessions(&self) -> SqlResult<Vec<SharedSession>> {
         self.conn()
             .prepare(
                 "SELECT id, project_id, project_name, host_id, host_name, started_at, my_status, people
