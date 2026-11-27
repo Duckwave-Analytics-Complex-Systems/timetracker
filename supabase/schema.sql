@@ -17,6 +17,13 @@
 -- row or its members. Any member can change phases and features, but only their
 -- own time entries. `profiles` and `project_members` can only be reached through
 -- the functions at the end, so nobody can browse the list of users.
+--
+-- Organizations: a studio's people (`org_members`, roles owner / admin / member)
+-- and its projects (`projects.org_id`; null = a personal project). The org's
+-- owner and admins can do everything a project's owner can on every project in
+-- the org, without a project_members row; members still see only the projects
+-- they're added to. `organizations` and `org_members` are reached only through
+-- the functions in "organizations" below.
 
 -- ---------------------------------------------------------------- tables
 
@@ -128,6 +135,29 @@ create table if not exists public.member_state (
   updated_at        timestamptz not null default clock_timestamp()
 );
 
+-- A studio. Its defaults are filled into new projects created in it.
+create table if not exists public.organizations (
+  id               text primary key,
+  name             text not null,
+  logo_data        text,              -- small data: URL
+  currency         text,              -- 3-letter code; null = each person's own
+  default_rate     double precision,
+  week_start       integer,           -- 1 = Monday, 0 = Sunday; null = each person's own
+  join_code        text not null unique,  -- anyone with it can join as a member
+  created_by       uuid references auth.users on delete set null,
+  created_at       timestamptz not null default clock_timestamp(),
+  updated_at       timestamptz not null default clock_timestamp()
+);
+
+-- Who is in each organization. Exactly one owner per organization.
+create table if not exists public.org_members (
+  org_id           text not null references public.organizations on delete cascade,
+  user_id          uuid not null references auth.users on delete cascade,
+  role             text not null check (role in ('owner', 'admin', 'member')),
+  created_at       timestamptz not null default clock_timestamp(),
+  primary key (org_id, user_id)
+);
+
 -- "Did you leave anything pending?": a person's checklist per project, from the
 -- dialog shown when a session stops. Private to that person, even on a shared project.
 create table if not exists public.pending_items (
@@ -161,6 +191,31 @@ alter table public.projects add column if not exists active_feature_id text;
 alter table public.time_entries add column if not exists feature_id text;
 alter table public.time_entries add column if not exists note text;
 alter table public.projects add column if not exists final_payment double precision;
+-- The organization the project belongs to; null = personal. Deleting the
+-- organization makes its projects personal again (their owners keep them).
+alter table public.projects add column if not exists org_id text
+  references public.organizations on delete set null;
+
+-- Profile v2 (Android 2.4). The desktop reads only display_name and share_code.
+alter table public.profiles add column if not exists avatar_kind text not null default 'initials';
+alter table public.profiles add column if not exists avatar_preset text;     -- '01', '02', ... (bundled image)
+alter table public.profiles add column if not exists avatar_color integer;   -- palette slot 0..7, for initials
+alter table public.profiles add column if not exists avatar_data text;       -- photo: small JPEG data: URL
+alter table public.profiles add column if not exists currency text not null default 'USD';
+alter table public.profiles add column if not exists week_start integer not null default 1;  -- 1 = Monday, 0 = Sunday
+alter table public.profiles add column if not exists weekly_goal_hours double precision;
+alter table public.profiles add column if not exists work_days integer not null default 31;  -- bit 0 = Monday .. bit 6 = Sunday
+alter table public.profiles add column if not exists work_start text not null default '09:00';
+alter table public.profiles add column if not exists work_end text not null default '18:00';
+alter table public.profiles add column if not exists default_rate double precision;
+alter table public.profiles add column if not exists updated_at timestamptz not null default clock_timestamp();
+-- Organizations: whether teammates see when you're tracking one of its projects (org_presence()).
+alter table public.profiles add column if not exists share_activity boolean not null default true;
+
+-- Time someone tracked stays on a shared project after they delete their
+-- account (see delete_my_account), so it must not go with their user row. The
+-- apps show it under "Former members".
+alter table public.time_entries drop constraint if exists time_entries_user_id_fkey;
 
 -- Profile v2 (Android 2.4). The desktop reads only display_name and share_code.
 alter table public.profiles add column if not exists avatar_kind text not null default 'initials';
@@ -182,6 +237,8 @@ alter table public.profiles add column if not exists updated_at timestamptz not 
 alter table public.time_entries drop constraint if exists time_entries_user_id_fkey;
 
 create index if not exists project_members_user       on public.project_members (user_id);
+create index if not exists org_members_user           on public.org_members (user_id);
+create index if not exists projects_org               on public.projects (org_id);
 create index if not exists phases_project             on public.phases (project_id);
 create index if not exists features_project           on public.features (project_id);
 create index if not exists time_entries_project       on public.time_entries (project_id);
@@ -205,7 +262,8 @@ do $$
 declare t text;
 begin
   foreach t in array array[
-    'projects', 'features', 'phases', 'time_entries', 'timers', 'member_state', 'profiles', 'pending_items', 'devices'
+    'projects', 'features', 'phases', 'time_entries', 'timers', 'member_state', 'profiles', 'pending_items', 'devices',
+    'organizations'
   ] loop
     execute format('drop trigger if exists touch_updated_at on public.%I', t);
     execute format(
@@ -221,15 +279,81 @@ insert into public.project_members (project_id, user_id, role)
 select id, user_id, 'owner' from public.projects where not deleted
 on conflict do nothing;
 
+create or replace function public.is_org_member(p_org_id text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.org_members where org_id = p_org_id and user_id = auth.uid()
+  )
+$$;
+
+create or replace function public.is_org_admin(p_org_id text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.org_members
+    where org_id = p_org_id and user_id = auth.uid() and role in ('owner', 'admin')
+  )
+$$;
+
 -- Runs without row level security, so the policies below can use it on
--- project_members without looping back into themselves.
+-- project_members without looping back into themselves. An organization's
+-- owner and admins count as members of all its projects.
 create or replace function public.is_project_member(p_project_id text) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (
     select 1 from public.project_members
     where project_id = p_project_id and user_id = auth.uid()
+  ) or exists (
+    select 1 from public.projects p
+    join public.org_members om on om.org_id = p.org_id
+    where p.id = p_project_id and om.user_id = auth.uid() and om.role in ('owner', 'admin')
   )
 $$;
+
+-- Owner or org admin: may change the project row and its members.
+create or replace function public.can_manage_project(p_project_id text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.projects p
+    where p.id = p_project_id and not p.deleted
+      and (p.user_id = auth.uid() or (p.org_id is not null and public.is_org_admin(p.org_id)))
+  )
+$$;
+
+-- What the apps may change on a project row, beyond the policies:
+-- * user_id (the owner) changes only inside the functions below, which set
+--   tt.internal.
+-- * org_id: into an organization only by the project's owner and only one
+--   they're in; out of one only by its owner or an admin.
+-- A change that isn't allowed is dropped (the old value is kept) rather than
+-- refused, so a device's upload queue never gets stuck on it; the device
+-- gets the real value back on its next pull.
+create or replace function public.guard_project() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := auth.uid();
+begin
+  if uid is null or current_setting('tt.internal', true) = 'on' then
+    return new;
+  end if;
+  if tg_op = 'INSERT' then
+    if new.org_id is not null and not public.is_org_member(new.org_id) then
+      new.org_id := null;
+    end if;
+    return new;
+  end if;
+  new.user_id := old.user_id;
+  if new.org_id is distinct from old.org_id then
+    if (old.org_id is not null and not public.is_org_admin(old.org_id))
+       or (new.org_id is not null and not (old.user_id = uid and public.is_org_member(new.org_id))) then
+      new.org_id := old.org_id;
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists guard_project on public.projects;
+create trigger guard_project before insert or update on public.projects
+for each row execute function public.guard_project();
 
 create or replace function public.add_project_owner() returns trigger
 language plpgsql security definer set search_path = '' as $$
@@ -317,10 +441,15 @@ grant delete on public.devices to authenticated;
 -- they'd let people edit their share code directly.
 alter table public.profiles enable row level security;
 alter table public.project_members enable row level security;
+alter table public.organizations enable row level security;
+alter table public.org_members enable row level security;
 drop policy if exists own_rows on public.profiles;
 drop policy if exists own_membership_read on public.project_members;
 
--- Everyone in a project reads it. Only its owner changes it.
+-- Everyone in a project reads it. Only its owner, or an admin of its
+-- organization, changes it. (guard_project keeps user_id from changing, so the
+-- update needs no check of its own: after an admin takes a project out of the
+-- organization it's no longer theirs to see.)
 drop policy if exists member_read on public.projects;
 drop policy if exists owner_insert on public.projects;
 drop policy if exists owner_update on public.projects;
@@ -329,7 +458,8 @@ create policy member_read on public.projects for select to authenticated
 create policy owner_insert on public.projects for insert to authenticated
   with check (user_id = (select auth.uid()));
 create policy owner_update on public.projects for update to authenticated
-  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+  using (user_id = (select auth.uid()) or (org_id is not null and public.is_org_admin(org_id)))
+  with check (true);
 
 -- Everyone in a project reads its time. People change only their own.
 drop policy if exists member_read on public.time_entries;
@@ -448,37 +578,364 @@ language sql stable security definer set search_path = '' as $$
   where public.is_project_member(m.project_id)
 $$;
 
--- The owner adds someone by their share code. Returns their name.
+-- Adds a person to a project. Only its owner or an admin of its organization;
+-- a project in an organization takes only people in that organization.
+-- Returns their name.
+create or replace function public.add_member_by_id(p_project_id text, p_user_id uuid) returns text
+language plpgsql security definer set search_path = '' as $$
+declare
+  org text;
+begin
+  if not public.can_manage_project(p_project_id) then
+    raise exception 'Only the project owner can add people.';
+  end if;
+  select org_id into org from public.projects where id = p_project_id;
+  if org is not null and not exists (
+    select 1 from public.org_members where org_id = org and user_id = p_user_id
+  ) then
+    raise exception 'Add them to the organization first.';
+  end if;
+  insert into public.project_members (project_id, user_id, role)
+  values (p_project_id, p_user_id, 'member')
+  on conflict do nothing;
+  return coalesce((select display_name from public.profiles where id = p_user_id), '');
+end $$;
+
+-- The same, by the person's share code.
 create or replace function public.add_member(p_project_id text, p_share_code text) returns text
 language plpgsql security definer set search_path = '' as $$
 declare
   target public.profiles;
 begin
-  if not exists (select 1 from public.projects where id = p_project_id and user_id = auth.uid() and not deleted) then
+  if not public.can_manage_project(p_project_id) then
     raise exception 'Only the project owner can add people.';
   end if;
   select * into target from public.profiles where share_code = upper(trim(p_share_code));
   if not found then
     raise exception 'No one has that share code.';
   end if;
-  insert into public.project_members (project_id, user_id, role)
-  values (p_project_id, target.id, 'member')
-  on conflict do nothing;
-  return target.display_name;
+  return public.add_member_by_id(p_project_id, target.id);
 end $$;
 
--- The owner removes a member, or a member leaves. The owner can't be removed.
--- The time they tracked stays on the project.
+-- The owner (or an org admin) removes a member, or a member leaves. The owner
+-- can't be removed. The time they tracked stays on the project.
 create or replace function public.remove_member(p_project_id text, p_user_id uuid) returns void
 language plpgsql security definer set search_path = '' as $$
-declare
-  is_owner boolean := exists (select 1 from public.projects where id = p_project_id and user_id = auth.uid());
 begin
-  if not is_owner and p_user_id is distinct from auth.uid() then
+  if not public.can_manage_project(p_project_id) and p_user_id is distinct from auth.uid() then
     raise exception 'Only the project owner can remove people.';
   end if;
   delete from public.project_members
   where project_id = p_project_id and user_id = p_user_id and role <> 'owner';
+end $$;
+
+-- ---------------------------------------------------------------- organizations
+
+-- A code like "ORG-7KQ2MX", from gen_random_uuid() (random() can be predicted).
+create or replace function public.new_org_code() returns text
+language plpgsql volatile set search_path = '' as $$
+declare
+  alphabet constant text := '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; -- no 0, O, 1 or I
+  code text := 'ORG-';
+begin
+  for i in 1..6 loop
+    code := code || substr(alphabet, 1 + (('x' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 4))::bit(16)::int % 32), 1);
+  end loop;
+  return code;
+end $$;
+
+-- Hands a project to another person: they become its owner (and a member).
+-- The previous owner stays in it as a member.
+create or replace function public.transfer_project(p_project_id text, p_to uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  was text := coalesce(current_setting('tt.internal', true), 'off');
+begin
+  perform set_config('tt.internal', 'on', true);
+  update public.project_members set role = 'member' where project_id = p_project_id and role = 'owner';
+  insert into public.project_members (project_id, user_id, role) values (p_project_id, p_to, 'owner')
+  on conflict (project_id, user_id) do update set role = 'owner';
+  update public.projects set user_id = p_to where id = p_project_id;
+  perform set_config('tt.internal', was, true);
+end $$;
+
+-- The organizations you're in. join_code only for its owner and admins.
+create or replace function public.my_orgs()
+returns table (id text, name text, logo_data text, currency text, default_rate double precision,
+               week_start integer, join_code text, role text, created_at bigint)
+language sql stable security definer set search_path = '' as $$
+  select o.id, o.name, o.logo_data, o.currency, o.default_rate, o.week_start,
+         case when m.role in ('owner', 'admin') then o.join_code end,
+         m.role, (extract(epoch from o.created_at) * 1000)::bigint
+  from public.organizations o
+  join public.org_members m on m.org_id = o.id and m.user_id = auth.uid()
+$$;
+
+-- Everyone in every organization you're in, with their names.
+create or replace function public.my_org_members()
+returns table (org_id text, user_id uuid, role text, display_name text, joined_at bigint)
+language sql stable security definer set search_path = '' as $$
+  select m.org_id, m.user_id, m.role, coalesce(pr.display_name, ''),
+         (extract(epoch from m.created_at) * 1000)::bigint
+  from public.org_members m
+  left join public.profiles pr on pr.id = m.user_id
+  where public.is_org_member(m.org_id)
+$$;
+
+-- Checks an organization's name: 1 to 60 characters.
+create or replace function public.clean_org_name(p_name text) returns text
+language plpgsql immutable set search_path = '' as $$
+declare
+  clean text := trim(p_name);
+begin
+  if clean is null or clean = '' or length(clean) > 60 then
+    raise exception 'A name needs 1 to 60 characters.';
+  end if;
+  return clean;
+end $$;
+
+-- Creates an organization with you as its owner. Returns its id.
+create or replace function public.create_org(p_name text) returns text
+language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := auth.uid();
+  new_id text := gen_random_uuid()::text;
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+  perform public.ensure_profile();
+  loop
+    begin
+      insert into public.organizations (id, name, join_code, created_by)
+      values (new_id, public.clean_org_name(p_name), public.new_org_code(), uid);
+      exit;
+    exception when unique_violation then
+      null; -- that code is taken: try another
+    end;
+  end loop;
+  insert into public.org_members (org_id, user_id, role) values (new_id, uid, 'owner');
+  return new_id;
+end $$;
+
+-- Joins an organization by its code, as a member. Returns its id.
+create or replace function public.join_org(p_code text) returns text
+language plpgsql security definer set search_path = '' as $$
+declare
+  org text;
+begin
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+  select id into org from public.organizations where join_code = upper(trim(p_code));
+  if not found then
+    raise exception 'No organization has that code.';
+  end if;
+  perform public.ensure_profile();
+  insert into public.org_members (org_id, user_id, role) values (org, auth.uid(), 'member')
+  on conflict do nothing;
+  return org;
+end $$;
+
+-- An owner or admin adds someone by their share code, as a member. Returns their name.
+create or replace function public.add_org_member(p_org_id text, p_share_code text) returns text
+language plpgsql security definer set search_path = '' as $$
+declare
+  target public.profiles;
+begin
+  if not public.is_org_admin(p_org_id) then
+    raise exception 'Only the organization''s owner and admins can add people.';
+  end if;
+  select * into target from public.profiles where share_code = upper(trim(p_share_code));
+  if not found then
+    raise exception 'No one has that share code.';
+  end if;
+  insert into public.org_members (org_id, user_id, role) values (p_org_id, target.id, 'member')
+  on conflict do nothing;
+  return target.display_name;
+end $$;
+
+-- Someone leaves an organization, or is removed from it: the owner removes
+-- anyone, an admin removes members, anyone can leave (except the owner, who
+-- hands the organization on or deletes it). They leave its projects too, and
+-- the projects they owned there go to the organization's owner. The time they
+-- tracked stays.
+create or replace function public.remove_org_member(p_org_id text, p_user_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  my_role text;
+  their_role text;
+  org_owner uuid;
+  r record;
+begin
+  select role into my_role from public.org_members where org_id = p_org_id and user_id = auth.uid();
+  select role into their_role from public.org_members where org_id = p_org_id and user_id = p_user_id;
+  if their_role is null then
+    return;
+  end if;
+  if their_role = 'owner' then
+    raise exception 'The owner can''t leave: make someone else the owner, or delete the organization.';
+  end if;
+  if p_user_id is distinct from auth.uid()
+     and not (my_role = 'owner' or (my_role = 'admin' and their_role = 'member')) then
+    raise exception 'Only the organization''s owner and admins can remove people.';
+  end if;
+  select user_id into org_owner from public.org_members where org_id = p_org_id and role = 'owner';
+  for r in select id from public.projects where org_id = p_org_id and user_id = p_user_id loop
+    perform public.transfer_project(r.id, org_owner);
+  end loop;
+  delete from public.project_members pm
+  using public.projects p
+  where p.id = pm.project_id and p.org_id = p_org_id and pm.user_id = p_user_id;
+  delete from public.org_members where org_id = p_org_id and user_id = p_user_id;
+end $$;
+
+-- The owner makes someone an admin or a member, or hands the organization
+-- over (p_role = 'owner': they become the owner and you an admin).
+create or replace function public.set_org_role(p_org_id text, p_user_id uuid, p_role text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not exists (
+    select 1 from public.org_members where org_id = p_org_id and user_id = auth.uid() and role = 'owner'
+  ) then
+    raise exception 'Only the organization''s owner can change roles.';
+  end if;
+  if p_role not in ('owner', 'admin', 'member') then
+    raise exception 'Unknown role.';
+  end if;
+  if p_user_id = auth.uid() then
+    raise exception 'Make someone else the owner instead.';
+  end if;
+  if not exists (select 1 from public.org_members where org_id = p_org_id and user_id = p_user_id) then
+    raise exception 'They aren''t in this organization.';
+  end if;
+  if p_role = 'owner' then
+    update public.org_members set role = 'admin' where org_id = p_org_id and user_id = auth.uid();
+  end if;
+  update public.org_members set role = p_role where org_id = p_org_id and user_id = p_user_id;
+end $$;
+
+-- An owner or admin changes the organization. Only the keys present change;
+-- each is checked.
+create or replace function public.update_org(p_org_id text, p_changes jsonb) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  o public.organizations;
+  v jsonb;
+  k text;
+  allowed constant text[] := array['name', 'logo_data', 'currency', 'default_rate', 'week_start'];
+begin
+  if not public.is_org_admin(p_org_id) then
+    raise exception 'Only the organization''s owner and admins can change it.';
+  end if;
+  if jsonb_typeof(p_changes) is distinct from 'object' then
+    raise exception 'Expected an object of changes.';
+  end if;
+  for k in select jsonb_object_keys(p_changes) loop
+    if not k = any(allowed) then
+      raise exception 'Unknown organization field: %', k;
+    end if;
+  end loop;
+  select * into o from public.organizations where id = p_org_id;
+
+  if p_changes ? 'name' then
+    o.name := public.clean_org_name(p_changes ->> 'name');
+  end if;
+  if p_changes ? 'logo_data' then
+    o.logo_data := p_changes ->> 'logo_data';
+    if o.logo_data is not null
+       and (o.logo_data !~ '^data:image/(jpeg|png);base64,' or length(o.logo_data) > 81920) then
+      raise exception 'The logo must be a JPEG or PNG of 60 KB or less.';
+    end if;
+  end if;
+  if p_changes ? 'currency' then
+    o.currency := upper(p_changes ->> 'currency');
+    if o.currency is not null and o.currency !~ '^[A-Z]{3}$' then
+      raise exception 'A currency is a 3-letter code, like USD.';
+    end if;
+  end if;
+  if p_changes ? 'default_rate' then
+    v := p_changes -> 'default_rate';
+    o.default_rate := case when jsonb_typeof(v) = 'null' then null else (v #>> '{}')::double precision end;
+    if o.default_rate is not null and o.default_rate < 0 then
+      raise exception 'A rate can''t be negative.';
+    end if;
+  end if;
+  if p_changes ? 'week_start' then
+    v := p_changes -> 'week_start';
+    o.week_start := case when jsonb_typeof(v) = 'null' then null else (v #>> '{}')::integer end;
+    if o.week_start is not null and o.week_start not in (0, 1) then
+      raise exception 'The week starts on Monday (1) or Sunday (0).';
+    end if;
+  end if;
+
+  update public.organizations set
+    name = o.name, logo_data = o.logo_data, currency = o.currency,
+    default_rate = o.default_rate, week_start = o.week_start
+  where id = p_org_id;
+end $$;
+
+-- An organization's people right now, for its dashboard. Any member may ask.
+-- * running / started_at: tracking one of the organization's projects (never a
+--   personal one), unless they turned share_activity off. project_id and
+--   project_name only if you can see that project too.
+-- * weekly_goal_hours: only for the owner and admins (everyone's), or your own.
+create or replace function public.org_presence(p_org_id text)
+returns table (user_id uuid, display_name text, role text, weekly_goal_hours double precision,
+               running boolean, project_id text, project_name text, started_at bigint)
+language sql stable security definer set search_path = '' as $$
+  with people as (
+    select m.user_id, m.role, pr.display_name, pr.weekly_goal_hours, t.started_at, p.id as pid, p.name as pname,
+           coalesce(t.running and pr.share_activity and p.org_id = p_org_id and not p.deleted, false) as busy
+    from public.org_members m
+    left join public.profiles pr on pr.id = m.user_id
+    left join public.timers t on t.user_id = m.user_id
+    left join public.projects p on p.id = t.project_id
+    where m.org_id = p_org_id and public.is_org_member(p_org_id)
+  )
+  select x.user_id, coalesce(x.display_name, ''), x.role,
+         case when public.is_org_admin(p_org_id) or x.user_id = auth.uid() then x.weekly_goal_hours end,
+         x.busy,
+         case when x.busy and public.is_project_member(x.pid) then x.pid end,
+         case when x.busy and public.is_project_member(x.pid) then x.pname end,
+         case when x.busy then x.started_at end
+  from people x
+$$;
+
+-- An owner or admin replaces the join code, so the old one stops working.
+create or replace function public.reset_org_join_code(p_org_id text) returns text
+language plpgsql security definer set search_path = '' as $$
+declare
+  code text;
+begin
+  if not public.is_org_admin(p_org_id) then
+    raise exception 'Only the organization''s owner and admins can change its code.';
+  end if;
+  loop
+    code := public.new_org_code();
+    begin
+      update public.organizations set join_code = code where id = p_org_id;
+      return code;
+    exception when unique_violation then
+      null;
+    end;
+  end loop;
+end $$;
+
+-- The owner deletes the organization. Its projects become personal projects
+-- of their owners, with the same members (org admins lose the access they had
+-- only through the organization).
+create or replace function public.delete_org(p_org_id text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not exists (
+    select 1 from public.org_members where org_id = p_org_id and user_id = auth.uid() and role = 'owner'
+  ) then
+    raise exception 'Only the organization''s owner can delete it.';
+  end if;
+  perform set_config('tt.internal', 'on', true);  -- the projects' org_id goes null
+  delete from public.organizations where id = p_org_id;
+  perform set_config('tt.internal', 'off', true);
 end $$;
 
 -- ---------------------------------------------------------------- profile (Android 2.4)
@@ -493,7 +950,7 @@ declare
   k text;
   allowed constant text[] := array[
     'display_name', 'avatar_kind', 'avatar_preset', 'avatar_color', 'avatar_data', 'currency', 'week_start',
-    'weekly_goal_hours', 'work_days', 'work_start', 'work_end', 'default_rate'];
+    'weekly_goal_hours', 'work_days', 'work_start', 'work_end', 'default_rate', 'share_activity'];
   hhmm constant text := '^([01][0-9]|2[0-3]):[0-5][0-9]$';
 begin
   if jsonb_typeof(p_changes) is distinct from 'object' then
@@ -582,7 +1039,12 @@ begin
     end if;
   end if;
 
+  if p_changes ? 'share_activity' then
+    p.share_activity := coalesce((p_changes ->> 'share_activity')::boolean, true);
+  end if;
+
   update public.profiles set
+    share_activity = p.share_activity,
     display_name = p.display_name, avatar_kind = p.avatar_kind, avatar_preset = p.avatar_preset,
     avatar_color = p.avatar_color, avatar_data = p.avatar_data, currency = p.currency,
     week_start = p.week_start, weekly_goal_hours = p.weekly_goal_hours, work_days = p.work_days,
@@ -592,20 +1054,29 @@ begin
   return p;
 end $$;
 
--- The avatars of everyone who shares a project with you, you included.
+-- The avatars of everyone who shares a project or an organization with you,
+-- you included.
 create or replace function public.member_avatars()
 returns table (user_id uuid, avatar_kind text, avatar_preset text, avatar_color integer, avatar_data text)
 language sql stable security definer set search_path = '' as $$
-  select distinct pr.id, pr.avatar_kind, pr.avatar_preset, pr.avatar_color, pr.avatar_data
-  from public.project_members m
-  join public.projects p on p.id = m.project_id and not p.deleted
-  join public.profiles pr on pr.id = m.user_id
-  where public.is_project_member(m.project_id)
+  select pr.id, pr.avatar_kind, pr.avatar_preset, pr.avatar_color, pr.avatar_data
+  from public.profiles pr
+  where pr.id in (
+    select m.user_id
+    from public.project_members m
+    join public.projects p on p.id = m.project_id and not p.deleted
+    where public.is_project_member(m.project_id)
+    union
+    select om.user_id from public.org_members om where public.is_org_member(om.org_id)
+  )
 $$;
 
--- Deletes your account and everything only you can see. Shared projects live
--- on: each one you own goes to its longest-standing other member, and the time
--- you tracked on shared projects stays there (shown as "Former members").
+-- Deletes your account and everything only you can see. Organizations and
+-- shared projects live on: an organization you own goes to its longest-standing
+-- admin (or member, if it has no admin), a project you own in an organization
+-- goes to the organization's owner, any other shared project you own goes to
+-- its longest-standing other member, and the time you tracked on shared
+-- projects stays there (shown as "Former members").
 create or replace function public.delete_my_account() returns void
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -616,8 +1087,32 @@ begin
   if uid is null then
     raise exception 'not signed in';
   end if;
+  perform set_config('tt.internal', 'on', true);  -- projects change owner below
 
-  -- Hand each shared project you own to the member who joined it first.
+  -- Hand each organization you own on; one with no one else in it goes (its
+  -- projects become personal, and go below with the rest of yours).
+  for r in select org_id from public.org_members where user_id = uid and role = 'owner' loop
+    select m.user_id into heir from public.org_members m
+    where m.org_id = r.org_id and m.user_id <> uid
+    order by (m.role = 'admin') desc, m.created_at, m.user_id
+    limit 1;
+    if heir is null then
+      delete from public.organizations where id = r.org_id;
+    else
+      update public.org_members set role = 'owner' where org_id = r.org_id and user_id = heir;
+    end if;
+  end loop;
+
+  -- Projects you own in an organization go to its owner.
+  for r in
+    select p.id, om.user_id as org_owner from public.projects p
+    join public.org_members om on om.org_id = p.org_id and om.role = 'owner'
+    where p.user_id = uid and not p.deleted and om.user_id <> uid
+  loop
+    perform public.transfer_project(r.id, r.org_owner);
+  end loop;
+
+  -- Hand each other shared project you own to the member who joined it first.
   for r in
     select p.id from public.projects p
     where p.user_id = uid and not p.deleted
@@ -659,10 +1154,19 @@ begin
   foreach f in array array[
     'is_project_member(text)', 'ensure_profile()', 'set_display_name(text)', 'my_memberships()',
     'add_member(text, text)', 'remove_member(text, uuid)', 'update_profile(jsonb)', 'member_avatars()',
-    'delete_my_account()'
+    'delete_my_account()',
+    'is_org_member(text)', 'is_org_admin(text)', 'can_manage_project(text)', 'add_member_by_id(text, uuid)',
+    'my_orgs()', 'my_org_members()', 'create_org(text)', 'join_org(text)', 'add_org_member(text, text)',
+    'remove_org_member(text, uuid)', 'set_org_role(text, uuid, text)', 'update_org(text, jsonb)',
+    'reset_org_join_code(text)', 'delete_org(text)', 'org_presence(text)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);
+  end loop;
+
+  -- Used only by the functions above, never called by the apps.
+  foreach f in array array['transfer_project(text, uuid)', 'new_org_code()', 'clean_org_name(text)', 'guard_project()'] loop
+    execute format('revoke all on function public.%s from public, anon, authenticated', f);
   end loop;
 end $$;
 

@@ -6,7 +6,7 @@
 //!   run every time. Add the column to the `CREATE TABLE` below as well, so
 //!   fresh databases match migrated ones.
 //! - **Data** migrations run once, guarded by `PRAGMA user_version`. Add a new
-//!   `if version < N` block at the end of `migrate` (currently at 6).
+//!   `if version < N` block at the end of `migrate` (currently at 7).
 
 use super::days::record_daily;
 use rusqlite::{params, Connection, Result as SqlResult};
@@ -36,7 +36,33 @@ const TABLES: &str = "
         active_feature_id TEXT,                      -- new time is booked to this feature
         run_note        TEXT,                        -- note for the open session; never synced
         -- v6.2
-        final_payment   REAL                         -- set when the project is ended; NULL = bill by hours
+        final_payment   REAL,                        -- set when the project is ended; NULL = bill by hours
+        -- v6.3
+        org_id          TEXT                         -- organization it belongs to; NULL = personal
+    );
+
+    -- v6.3: the organizations you're in and their people, refreshed from
+    -- my_orgs() and my_org_members() on every sync. Never pushed: they change
+    -- only through the server's functions. Same as the Android app's db.js.
+    CREATE TABLE IF NOT EXISTS organizations (
+        id           TEXT PRIMARY KEY,
+        name         TEXT NOT NULL,
+        logo_data    TEXT,
+        currency     TEXT,
+        default_rate REAL,
+        week_start   INTEGER,
+        join_code    TEXT,                           -- only for its owner and admins
+        role         TEXT NOT NULL,                  -- yours: 'owner' | 'admin' | 'member'
+        created_at   INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS org_members (
+        org_id       TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        user_id      TEXT NOT NULL,
+        role         TEXT NOT NULL,
+        display_name TEXT NOT NULL DEFAULT '',
+        joined_at    INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (org_id, user_id)
     );
 
     CREATE TABLE IF NOT EXISTS time_entries (
@@ -103,6 +129,7 @@ const INDEXES: &str = "
     CREATE INDEX IF NOT EXISTS idx_phases_project  ON phases(project_id);
     CREATE INDEX IF NOT EXISTS idx_entries_feature ON time_entries(feature_id);
     CREATE INDEX IF NOT EXISTS idx_features_project ON features(project_id);
+    CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id);
 ";
 
 pub(super) fn migrate(conn: &mut Connection) -> SqlResult<()> {
@@ -129,6 +156,7 @@ pub(super) fn migrate(conn: &mut Connection) -> SqlResult<()> {
     ensure_column(conn, "time_entries", "note", "TEXT")?; // v6
     ensure_column(conn, "time_entries", "user_id", "TEXT")?; // v6
     ensure_column(conn, "projects", "final_payment", "REAL")?; // v6.2
+    ensure_column(conn, "projects", "org_id", "TEXT")?; // v6.3
 
     conn.execute_batch(INDEXES)?;
     conn.execute_batch(super::sync::SYNC_TABLES)?; // v6
@@ -157,7 +185,15 @@ pub(super) fn migrate(conn: &mut Connection) -> SqlResult<()> {
         tx.pragma_update(None, "user_version", 6)?;
         tx.commit()?;
     }
-    // Next data migration: `if version < 7 { ... user_version = 7 }`.
+    if version < 7 {
+        // Projects pulled before org_id was kept have it empty here, and their
+        // next push would take them out of their organization: pull them again.
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM sync_meta WHERE key = 'cursor:projects'", [])?;
+        tx.pragma_update(None, "user_version", 7)?;
+        tx.commit()?;
+    }
+    // Next data migration: `if version < 8 { ... user_version = 8 }`.
     Ok(())
 }
 

@@ -1,10 +1,14 @@
-// Projects tab: the project cards, their ⋯ menu, the add/edit dialog and
-// logo upload.
+// Projects tab: the project cards of the workspace shown (Personal or an
+// organization, see orgs.js), their ⋯ menu, the add/edit dialog and logo upload.
 import { api } from '../core/api.js';
-import { escapeHtml, fmtHMS, money } from '../core/format.js';
+import { escapeHtml, fmtHMS } from '../core/format.js';
+import { moneyOf } from '../core/money.js';
 import { bill, billedPeople, liveSeconds } from '../core/model.js';
+import { PERSONAL, inWorkspace } from '../core/orgs.js';
 import { toggleTimer } from '../core/session-notes.js';
 import { openEndDialog } from './end-project.js';
+import { applyWorkspaceChange, chosenOrg, fillProjectWorkspace, startingRate, workspaceName } from './orgs.js';
+import { resizeImageToDataUrl } from './image.js';
 import { state, act } from './store.js';
 
 const SORT_STORAGE_KEY = 'timetrack:sort';
@@ -29,8 +33,11 @@ let logoTargetId = null;
 
 // ---------------------------------------------------------------- cards
 
+/** The projects of the workspace shown. */
+export const workspaceProjects = () => state.projects.filter((p) => inWorkspace(p, state.workspace));
+
 function sortedProjects() {
-  const rows = state.projects.map((p) => ({ p, seconds: liveSeconds(p) }));
+  const rows = workspaceProjects().map((p) => ({ p, seconds: liveSeconds(p) }));
   rows.sort((a, b) => {
     if (sortBy === 'rate') return (b.p.hourly_rate || 0) - (a.p.hourly_rate || 0);
     if (sortBy === 'bill') return bill(b.p, b.seconds) - bill(a.p, a.seconds);
@@ -71,7 +78,7 @@ function cardHtml(p, seconds) {
         <div class="card-sub">
           <span class="status-dot"></span>
           <span>${p.is_running ? (p.run_device ? 'Running on phone' : 'Running') : 'Paused'}</span>
-          ${p.hourly_rate ? `<span>·</span><span class="earnings">${money(bill(p, seconds))}</span>` : ''}
+          ${p.hourly_rate ? `<span>·</span><span class="earnings">${moneyOf(p, bill(p, seconds))}</span>` : ''}
           ${billedPeople(p) > 1 ? `<span>·</span><span class="people-badge">×${billedPeople(p)}</span>` : ''}
           ${p.shared ? '<span>·</span><span class="people-badge">Shared</span>' : ''}
         </div>
@@ -84,7 +91,15 @@ function cardHtml(p, seconds) {
 
 export function renderProjects() {
   listEl.innerHTML = '';
-  emptyEl.classList.toggle('hidden', state.projects.length > 0);
+  const shown = workspaceProjects();
+  emptyEl.classList.toggle('hidden', shown.length > 0);
+  if (!shown.length) {
+    const org = state.workspace !== PERSONAL;
+    $('emptyTitle').textContent = org ? `No projects in ${workspaceName(state.workspace)} yet.` : 'No projects yet.';
+    $('emptyHint').textContent = org
+      ? 'Add one here, or move one of yours in from its Edit dialog.'
+      : 'Add one to start tracking billable time.';
+  }
 
   for (const { p, seconds } of sortedProjects()) {
     const card = document.createElement('article');
@@ -194,11 +209,20 @@ export function openProjectDialog(project) {
   editingId = project ? project.id : null;
   $('dialogTitle').textContent = project ? 'Edit Project' : 'New Project';
   nameInput.value = project ? project.name : '';
-  rateInput.value = project ? project.hourly_rate || '' : '';
+  fillProjectWorkspace(project);
+  // A new project in an organization starts from its default rate.
+  rateInput.value = project ? project.hourly_rate || '' : startingRate() || '';
   peopleInput.value = project ? project.people_count || 1 : 1;
   dialogEl.showModal();
   nameInput.focus();
 }
+
+// A new project's rate follows the workspace picked, unless one was typed in.
+let rateShown = '';
+$('projectOrg').addEventListener('focus', () => { rateShown = rateInput.value; });
+$('projectOrg').addEventListener('change', () => {
+  if (!editingId && String(rateInput.value) === String(rateShown)) rateInput.value = startingRate() || '';
+});
 
 $('addProjectBtn').addEventListener('click', () => openProjectDialog());
 $('dialogCancel').addEventListener('click', () => dialogEl.close());
@@ -210,7 +234,12 @@ $('projectForm').addEventListener('submit', async (e) => {
     peopleCount: Math.max(1, parseInt(peopleInput.value, 10) || 1),
   };
   if (!fields.name) return;
-  await act(() => (editingId ? api.updateProject(editingId, fields) : api.addProject(fields)));
+  const editing = editingId ? state.projects.find((p) => p.id === editingId) : null;
+  await act(async () => {
+    if (!editing) return api.addProject({ ...fields, orgId: chosenOrg() });
+    await api.updateProject(editing.id, fields);
+    return applyWorkspaceChange(editing);
+  });
   dialogEl.close();
 });
 
@@ -230,26 +259,3 @@ logoInput.addEventListener('change', async () => {
     console.error('logo upload failed', err);
   }
 });
-
-function resizeImageToDataUrl(file, maxSize) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('invalid image'));
-      img.onload = () => {
-        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale));
-        const h = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}

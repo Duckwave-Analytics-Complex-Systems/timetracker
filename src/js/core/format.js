@@ -21,6 +21,11 @@ export function setFormatCurrency(code) {
   moneyFmt = null;
 }
 
+/** Your currency code, as set by setFormatCurrency() (undefined = "$" + number). */
+export function formatCurrency() {
+  return CURRENCY;
+}
+
 export function setWeekStart(day) {
   WEEK_START = day === 0 ? 0 : 1;
 }
@@ -68,13 +73,24 @@ export function money(amount) {
 }
 
 /** "$" rather than "US$" or "MX$" where the engine supports it; false if the code is unknown. */
-function currencyFormat() {
+function currencyFormat(currency = CURRENCY) {
   for (const currencyDisplay of ['narrowSymbol', 'symbol']) {
     try {
-      return new Intl.NumberFormat(LOCALE, { style: 'currency', currency: CURRENCY, currencyDisplay });
+      return new Intl.NumberFormat(LOCALE, { style: 'currency', currency, currencyDisplay });
     } catch { /* try the next one */ }
   }
   return false;
+}
+
+/**
+ * Like money(), in a given currency (an organization's) rather than yours.
+ * A missing or unknown code falls back to money().
+ */
+export function moneyIn(amount, currency) {
+  if (!/^[A-Z]{3}$/.test(currency || '') || currency === CURRENCY) return money(amount);
+  if (amount == null || !Number.isFinite(amount)) return '—';
+  const fmt = currencyFormat(currency);
+  return fmt ? fmt.format(amount) : money(amount);
 }
 
 /** 0.456 -> "46%" (null -> "—") */

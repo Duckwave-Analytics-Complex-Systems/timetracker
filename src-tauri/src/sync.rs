@@ -11,14 +11,16 @@
 //! 2. members: refresh who is in each project. A project you just joined has all
 //!    its rows fetched, since they're older than the cursors. One you're no longer
 //!    in is forgotten.
-//! 3. pull rows changed on the server since the last cursor
-//! 4. timer: push this device's start/stop through `push_timer()`, then
+//! 3. organizations: refresh the ones you're in and their people (skipped by
+//!    a server without them)
+//! 4. pull rows changed on the server since the last cursor
+//! 5. timer: push this device's start/stop through `push_timer()`, then
 //!    reconcile the local timer with the row the server returns
-//! 5. push again (reconciling may have booked a session)
+//! 6. push again (reconciling may have booked a session)
 //!
 //! All HTTP is blocking (`ureq`) and happens outside the `Db` lock.
 
-use crate::db::{self, Db, Entity, Member, Pending, RemoteTimer, TimerPush};
+use crate::db::{self, Db, Entity, Member, Org, OrgMember, Pending, RemoteTimer, TimerPush};
 use crate::events::{notify, Change};
 use crate::now_ms;
 use serde::{Deserialize, Serialize};
@@ -77,6 +79,14 @@ struct Session {
 pub struct Profile {
     pub display_name: String,
     pub share_code: String,
+    /// Organizations: teammates see when you're tracking one of its projects.
+    /// On unless turned off (and for a profile stored before it existed).
+    #[serde(default = "on")]
+    pub share_activity: bool,
+}
+
+fn on() -> bool {
+    true
 }
 
 /// What the Settings panel shows.
@@ -422,6 +432,19 @@ fn sync_members(db: &Db, rest: &Rest) -> SyncResult<bool> {
     Ok(db.apply_members(&members).map_err(msg)? || !joined.is_empty())
 }
 
+/// Replaces the local organizations with `my_orgs()` and `my_org_members()`.
+/// A server without organizations (schema older than 6.3) answers 404: skipped.
+fn sync_orgs(db: &Db, rest: &Rest) -> SyncResult<bool> {
+    let orgs = match rest.rpc("my_orgs", json!({})) {
+        Ok(v) => v,
+        Err(e) if e.starts_with("Server error 404") => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let orgs: Vec<Org> = serde_json::from_value(orgs).map_err(msg)?;
+    let people: Vec<OrgMember> = serde_json::from_value(rest.rpc("my_org_members", json!({}))?).map_err(msg)?;
+    db.apply_orgs(&orgs, &people).map_err(msg)
+}
+
 fn pull_rows(db: &Db, rest: &Rest) -> SyncResult<bool> {
     let mut changed = false;
     for entity in Entity::ALL {
@@ -486,6 +509,7 @@ fn cycle(db: &Db, cfg: &Config, session: Session) -> SyncResult<bool> {
     }
     push_rows(db, &rest)?;
     let mut changed = sync_members(db, &rest)?;
+    changed |= sync_orgs(db, &rest)?;
     changed |= pull_rows(db, &rest)?;
     changed |= db.stop_filed_timers(now_ms()).map_err(msg)?;
     changed |= sync_timer(db, &rest)?;
@@ -616,10 +640,28 @@ pub fn set_display_name(app: &AppHandle, name: &str) -> SyncResult<SyncStatus> {
     Ok(status(app))
 }
 
+/// Whether org teammates see when you're tracking one of its projects.
+pub fn set_share_activity(app: &AppHandle, on: bool) -> SyncResult<SyncStatus> {
+    as_signed_in(app, |db, rest| {
+        store(db, K_PROFILE, Some(&rest.profile("update_profile", json!({ "p_changes": { "share_activity": on } }))?))
+    })?;
+    Ok(status(app))
+}
+
 pub fn add_member(app: &AppHandle, project_id: &str, share_code: &str) -> SyncResult<String> {
     run_cycle(app); // the server must have the project first
     let name = as_signed_in(app, |_, rest| {
         rest.rpc("add_member", json!({ "p_project_id": project_id, "p_share_code": share_code }))
+    })?;
+    run_cycle(app);
+    Ok(name.as_str().unwrap_or_default().to_string())
+}
+
+/// Adds someone from the project's organization (picked from its people). Returns their name.
+pub fn add_member_by_id(app: &AppHandle, project_id: &str, user_id: &str) -> SyncResult<String> {
+    run_cycle(app); // the server must have the project first
+    let name = as_signed_in(app, |_, rest| {
+        rest.rpc("add_member_by_id", json!({ "p_project_id": project_id, "p_user_id": user_id }))
     })?;
     run_cycle(app);
     Ok(name.as_str().unwrap_or_default().to_string())
@@ -631,6 +673,66 @@ pub fn remove_member(app: &AppHandle, project_id: &str, user_id: &str) -> SyncRe
     })?;
     run_cycle(app);
     Ok(())
+}
+
+// ---------------------------------------------------------------- organizations
+
+/// Calls an organization function, then syncs so this device has the result
+/// (the organization, its people, and any projects that came with it).
+fn org_call(app: &AppHandle, function: &str, args: Value) -> SyncResult<Value> {
+    let out = as_signed_in(app, |_, rest| rest.rpc(function, args))?;
+    run_cycle(app);
+    Ok(out)
+}
+
+fn text(v: Value) -> String {
+    v.as_str().unwrap_or_default().to_string()
+}
+
+/// Creates an organization with you as its owner. Returns its id.
+pub fn create_org(app: &AppHandle, name: &str) -> SyncResult<String> {
+    org_call(app, "create_org", json!({ "p_name": name })).map(text)
+}
+
+/// Joins an organization by its invite code. Returns its id.
+pub fn join_org(app: &AppHandle, code: &str) -> SyncResult<String> {
+    org_call(app, "join_org", json!({ "p_code": code })).map(text)
+}
+
+/// Adds someone by their share code (owner and admins). Returns their name.
+pub fn add_org_member(app: &AppHandle, org_id: &str, share_code: &str) -> SyncResult<String> {
+    org_call(app, "add_org_member", json!({ "p_org_id": org_id, "p_share_code": share_code })).map(text)
+}
+
+/// Removes someone from an organization, or yourself (leaving).
+pub fn remove_org_member(app: &AppHandle, org_id: &str, user_id: &str) -> SyncResult<()> {
+    org_call(app, "remove_org_member", json!({ "p_org_id": org_id, "p_user_id": user_id })).map(|_| ())
+}
+
+/// "admin" | "member", or "owner" to hand the organization over. Owner only.
+pub fn set_org_role(app: &AppHandle, org_id: &str, user_id: &str, role: &str) -> SyncResult<()> {
+    org_call(app, "set_org_role", json!({ "p_org_id": org_id, "p_user_id": user_id, "p_role": role })).map(|_| ())
+}
+
+/// Changes { name, logo_data, currency, default_rate, week_start } (owner and admins).
+pub fn update_org(app: &AppHandle, org_id: &str, changes: Value) -> SyncResult<()> {
+    org_call(app, "update_org", json!({ "p_org_id": org_id, "p_changes": changes })).map(|_| ())
+}
+
+/// A new invite code; the old one stops working. Returns it.
+pub fn reset_org_join_code(app: &AppHandle, org_id: &str) -> SyncResult<String> {
+    org_call(app, "reset_org_join_code", json!({ "p_org_id": org_id })).map(text)
+}
+
+/// Who in the organization is tracking one of its projects now, and the
+/// weekly goals you may see (`org_presence()`). Read straight from the server.
+pub fn org_presence(app: &AppHandle, org_id: &str) -> SyncResult<Value> {
+    as_signed_in(app, |_, rest| rest.rpc("org_presence", json!({ "p_org_id": org_id })))
+}
+
+/// Deletes the organization (owner). Its projects become personal projects of their owners.
+pub fn delete_org(app: &AppHandle, org_id: &str) -> SyncResult<()> {
+    org_call(app, "delete_org", json!({ "p_org_id": org_id })).map(|_| ())
 }
 
 // Runs against real Postgres row-level security through the stand-in for

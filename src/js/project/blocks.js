@@ -1,7 +1,8 @@
 // HTML building blocks shared by the Overview tab and the report, so both
 // always show the same numbers the same way. They return markup strings and
 // are styled by css/project.css (app, dark) and report-style.js (report, light).
-import { escapeHtml, fmtDate, fmtDay, fmtHM, fmtHours, fmtTime, money, pct } from '../core/format.js';
+import { escapeHtml, fmtDate, fmtDay, fmtHM, fmtHours, fmtTime, pct } from '../core/format.js';
+import { moneyOf } from '../core/money.js';
 import { bill, billedPeople } from '../core/model.js';
 import { HEALTH, isMilestone, phaseStatusLabel } from './metrics.js';
 
@@ -44,7 +45,7 @@ export function kpiTilesHtml(m, project, totalSeconds) {
   ];
   if (project.hourly_rate > 0) {
     const people = billedPeople(project) > 1 ? ` × ${billedPeople(project)} people` : '';
-    tiles.push(tile('Billed to date', money(bill(project, totalSeconds)), `${money(project.hourly_rate)}/h${people}`, 'money'));
+    tiles.push(tile('Billed to date', moneyOf(project, bill(project, totalSeconds)), `${moneyOf(project, project.hourly_rate)}/h${people}`, 'money'));
   }
   return `<div class="kpis">${tiles.join('')}</div>`;
 }

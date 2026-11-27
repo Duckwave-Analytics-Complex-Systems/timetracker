@@ -136,6 +136,11 @@
             <label class="field"><span>Add someone by their share code</span><input id="memberCode" maxlength="20" spellcheck="false" placeholder="TT-7F3K9Q" /></label>
             <button type="submit" class="btn-primary" id="addMemberBtn">Add</button>
           </form>
+          <!-- An organization's project: pick from its people (js/project/main.js) -->
+          <form id="addOrgMemberForm" class="team-add hidden" autocomplete="off">
+            <label class="field"><span id="orgPickLabel">Add someone from the organization</span><select id="orgMemberPick"></select></label>
+            <button type="submit" class="btn-primary" id="addOrgMemberBtn">Add</button>
+          </form>
           <p class="panel-hint" id="teamStatus"></p>
           <div id="teamHost"></div>
           <div class="team-leave hidden" id="teamLeave"><button type="button" class="btn-danger" id="leaveBtn">Leave project</button></div>

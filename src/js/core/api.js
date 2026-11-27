@@ -9,7 +9,10 @@ export const api = {
   // ---- projects
   projects: () => invoke('get_projects'),
   archivedProjects: () => invoke('get_archived_projects'),
-  addProject: ({ name, hourlyRate, peopleCount }) => invoke('add_project', { name, hourlyRate, peopleCount }),
+  /** orgId: the organization to create it in; null = a personal project. */
+  addProject: ({ name, hourlyRate, peopleCount, orgId = null }) => invoke('add_project', { name, hourlyRate, peopleCount, orgId }),
+  /** Moves a project into an organization, or back to personal (null). */
+  setProjectOrg: (id, orgId) => invoke('set_project_org', { id, orgId }),
   updateProject: (id, { name, hourlyRate, peopleCount }) => invoke('update_project', { id, name, hourlyRate, peopleCount }),
   setLogo: (id, dataUrl) => invoke('set_project_logo', { id, dataUrl }),
   archiveProject: (id) => invoke('archive_project', { id }),
@@ -57,10 +60,14 @@ export const api = {
   cloudSignOut: () => invoke('cloud_sign_out'),
   cloudSyncNow: () => invoke('cloud_sync_now'),
   cloudSetDisplayName: (name) => invoke('cloud_set_display_name', { name }),
+  /** Whether org teammates see when you're tracking one of its projects. */
+  cloudSetShareActivity: (on) => invoke('cloud_set_share_activity', { on }),
 
   // ---- sharing
   /** Resolves to the added person's name. */
   addMember: (projectId, shareCode) => invoke('cloud_add_member', { projectId, shareCode }),
+  /** Adds someone picked from the project's organization. Resolves to their name. */
+  addMemberById: (projectId, userId) => invoke('cloud_add_member_by_id', { projectId, userId }),
   /** Removing yourself is leaving the project. */
   removeMember: (projectId, userId) => invoke('cloud_remove_member', { projectId, userId }),
 

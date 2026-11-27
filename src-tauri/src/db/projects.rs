@@ -43,8 +43,15 @@ pub struct Project {
     /// Has more than one member. `total_seconds` then counts everyone's time.
     pub shared: bool,
     /// False if someone else owns it. Then only phases, features and your own
-    /// time can be changed here.
+    /// time can be changed here. True for an admin of its organization too.
     pub is_owner: bool,
+    /// The organization it belongs to; `None` = a personal project.
+    #[serde(default)]
+    pub org_id: Option<String>,
+    /// Seen only as an admin of its organization: you can change it, but you
+    /// aren't one of its members (and don't own it).
+    #[serde(default)]
+    pub managed_only: bool,
 }
 
 impl Project {
@@ -81,7 +88,10 @@ const SELECT_PROJECT: &str = "
            (SELECT COUNT(*) FROM project_members m WHERE m.project_id = p.id) > 1,
            COALESCE((SELECT m.role FROM project_members m WHERE m.project_id = p.id
                      AND m.user_id = (SELECT value FROM sync_meta WHERE key = 'user_id')), 'owner') = 'owner',
-           p.final_payment
+           p.final_payment, p.org_id,
+           EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id)
+             AND NOT EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id
+                             AND m.user_id = (SELECT value FROM sync_meta WHERE key = 'user_id'))
     FROM projects p
     LEFT JOIN phases ph ON ph.id = p.active_phase_id
     LEFT JOIN features f ON f.id = p.active_feature_id";
@@ -113,6 +123,8 @@ fn from_row(r: &Row) -> SqlResult<Project> {
         shared: r.get(22)?,
         is_owner: r.get(23)?,
         final_payment: r.get(24)?,
+        org_id: r.get(25)?,
+        managed_only: r.get(26)?,
     })
 }
 
@@ -160,6 +172,14 @@ impl Db {
             "INSERT INTO projects (id, name, hourly_rate, created_at, people_count) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![id, name, hourly_rate, now, people_count.max(1)],
         )?;
+        Ok(())
+    }
+
+    /// Moves a project into an organization, or back to personal (`None`). It
+    /// goes up with the project row; the server keeps the old value if you
+    /// may not make the change (see `guard_project()` in supabase/schema.sql).
+    pub fn set_project_org(&self, id: &str, org_id: Option<&str>) -> SqlResult<()> {
+        self.conn().execute("UPDATE projects SET org_id = ?1 WHERE id = ?2", params![org_id, id])?;
         Ok(())
     }
 

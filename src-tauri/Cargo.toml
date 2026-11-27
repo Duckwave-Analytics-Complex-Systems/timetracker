@@ -1,6 +1,6 @@
 [package]
 name = "timetrack-widget"
-version = "6.3.0"
+version = "6.4.0"
 description = "Lightweight cross-platform billable time tracking widget"
 authors = ["Duckwave Physics Inspired, Modeling and Analytics", "pplalo"]
 edition = "2021"

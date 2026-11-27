@@ -3,7 +3,8 @@
 // shows what the project earned and per tracked hour; the tiles on top add
 // them up over every ended project.
 import { api } from '../core/api.js';
-import { escapeHtml, fmtDate, fmtHM, money } from '../core/format.js';
+import { escapeHtml, fmtDate, fmtHM, money, moneyIn } from '../core/format.js';
+import { addMoney, fmtTotal, moneyOf, newTotal, singleCurrency } from '../core/money.js';
 import { earned, effectiveRate } from '../core/model.js';
 import { openEndDialog } from './end-project.js';
 import { logoMarkup, openMenu } from './projects.js';
@@ -22,15 +23,19 @@ function renderSummary(rows) {
   const seconds = rows.reduce((sum, p) => sum + p.total_seconds, 0);
   // The average rate only counts projects with a known amount, over their own hours.
   const paid = rows.filter((p) => earned(p, p.total_seconds) != null);
-  const amount = paid.reduce((sum, p) => sum + earned(p, p.total_seconds), 0);
+  // Per currency; a rate over projects in different currencies means nothing.
+  const total = paid.reduce((t, p) => addMoney(t, p, earned(p, p.total_seconds)), newTotal());
+  const code = singleCurrency(total);
+  const amount = code === undefined ? null : total.get(code);
   const paidSeconds = paid.reduce((sum, p) => sum + p.total_seconds, 0);
-  const rate = paidSeconds > 0 ? amount / (paidSeconds / 3600) : null;
+  const rate = amount != null && paidSeconds > 0 ? amount / (paidSeconds / 3600) : null;
+  const rateText = rate == null ? '—' : `${code ? moneyIn(rate, code) : money(rate)}/h`;
   const unpaid = rows.length - paid.length;
   summaryEl.innerHTML = [
     tile('Ended projects', rows.length),
     tile('Total tracked', fmtHM(seconds)),
-    tile('Earned', `<span class="earnings">${paid.length ? money(amount) : '—'}</span>`, unpaid ? `${unpaid} without a payment` : ''),
-    tile('Per hour', rate != null ? `${money(rate)}/h` : '—', paid.length ? `over ${fmtHM(paidSeconds)}` : ''),
+    tile('Earned', `<span class="earnings">${paid.length ? fmtTotal(total) : '—'}</span>`, unpaid ? `${unpaid} without a payment` : ''),
+    tile('Per hour', rateText, rate != null ? `over ${fmtHM(paidSeconds)}` : paid.length ? 'mixed currencies' : ''),
   ].join('');
 }
 
@@ -38,9 +43,9 @@ function rowSub(p) {
   const parts = [p.archived_at ? `Ended ${fmtDate(new Date(p.archived_at))}` : 'Ended', fmtHM(p.total_seconds)];
   const amount = earned(p, p.total_seconds);
   if (amount != null) {
-    parts.push(`<span class="earnings" title="${p.final_payment > 0 ? 'Final payment' : 'Hourly bill'}">${money(amount)}</span>`);
+    parts.push(`<span class="earnings" title="${p.final_payment > 0 ? 'Final payment' : 'Hourly bill'}">${moneyOf(p, amount)}</span>`);
     const rate = effectiveRate(p, p.total_seconds);
-    if (rate != null) parts.push(`${money(rate)}/h`);
+    if (rate != null) parts.push(`${moneyOf(p, rate)}/h`);
   } else if (p.is_owner) {
     parts.push('<button class="link-btn" data-action="payment">Add payment</button>');
   }

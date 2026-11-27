@@ -5,7 +5,8 @@
 // to whichever tab is visible. Reloads on every `data-changed` event, so
 // edits made here, in the widget, or in another window all show up.
 import { api, onDataChanged } from '../core/api.js';
-import { escapeHtml, fmtDate, fmtHMS, fmtTime, money } from '../core/format.js';
+import { escapeHtml, fmtDate, fmtHMS, fmtTime } from '../core/format.js';
+import { moneyOf, setOrgCurrencies } from '../core/money.js';
 import { bill, billedPeople, effectiveRate, liveSeconds } from '../core/model.js';
 import { appWindow, getAppVersion, saveDialog, writeTextFile } from '../core/tauri.js';
 import { setupTitlebar } from '../core/titlebar.js';
@@ -15,6 +16,7 @@ import { featureTableHtml, memberTableHtml, pill, sessionTableHtml } from './blo
 import { openFeatureDialog } from './feature-dialog.js';
 import { isDragging, renderGantt, scrollToToday, ZOOMS } from './gantt.js';
 import { computeMetrics, HEALTH, isMilestone, sessionRows, withLiveTime } from './metrics.js';
+import { addableMembers, canManageMembers } from '../core/orgs.js';
 import { renderOverview } from './overview.js';
 import { openPhaseDialog } from './phase-dialog.js';
 import { reportDocument, reportFileName, reportHtml } from './report.js';
@@ -30,6 +32,8 @@ const $ = (id) => document.getElementById(id);
 
 let detail = null; // { project, phases, features, sessions, daily, members } from the backend
 let cloud = null; // cloud sync status, for the Team tab
+let orgs = []; // your organizations, for the project's (header, Team tab)
+let orgPeople = []; // the people of the project's organization, to add from
 let tab = 'overview';
 let zoom = ZOOMS[localStorage.getItem(ZOOM_KEY)] ? localStorage.getItem(ZOOM_KEY) : 'week';
 let appVersion = '';
@@ -38,7 +42,10 @@ let appVersion = '';
 
 async function load() {
   try {
-    [detail, cloud] = await Promise.all([api.projectDetail(PROJECT_ID), api.cloudStatus()]);
+    [detail, cloud, orgs] = await Promise.all([api.projectDetail(PROJECT_ID), api.cloudStatus(), api.orgs().catch(() => [])]);
+    setOrgCurrencies(orgs); // before anything draws money
+    const orgId = detail.project.org_id;
+    orgPeople = orgId && orgs.some((o) => o.id === orgId) ? await api.orgMembers(orgId).catch(() => []) : [];
   } catch (err) {
     console.error(err);
     appWindow.close(); // the project was deleted
@@ -82,13 +89,15 @@ function renderHeader(live, m) {
     : `<div class="proj-logo logo-placeholder">${escapeHtml((p.name[0] || '?').toUpperCase())}</div>`;
 
   const meta = [pill(HEALTH[m.health].tone, HEALTH[m.health].label)];
-  if (p.hourly_rate > 0) meta.push(`<span class="earnings">${money(p.hourly_rate)}/h${billedPeople(p) > 1 ? ` × ${billedPeople(p)}` : ''}</span>`);
-  if (p.shared) meta.push(`<span>${p.is_owner ? 'Shared by you' : 'Shared with you'}</span>`);
+  if (p.hourly_rate > 0) meta.push(`<span class="earnings">${moneyOf(p, p.hourly_rate)}/h${billedPeople(p) > 1 ? ` × ${billedPeople(p)}` : ''}</span>`);
+  const org = orgs.find((o) => o.id === p.org_id);
+  if (org) meta.push(`<span>In ${escapeHtml(org.name)}${p.managed_only ? ' (as admin)' : ''}</span>`);
+  if (p.shared) meta.push(`<span>${p.is_owner && !p.managed_only ? 'Shared by you' : 'Shared with you'}</span>`);
   meta.push(`<span>Created ${fmtDate(new Date(p.created_at))}</span>`);
   if (p.archived && p.archived_at) meta.push(`<span>Ended ${fmtDate(new Date(p.archived_at))}</span>`);
   if (p.final_payment > 0) {
     const rate = effectiveRate(p, p.total_seconds);
-    meta.push(`<span class="earnings">Paid ${money(p.final_payment)}${rate != null ? ` · ${money(rate)}/h` : ''}</span>`);
+    meta.push(`<span class="earnings">Paid ${moneyOf(p, p.final_payment)}${rate != null ? ` · ${moneyOf(p, rate)}/h` : ''}</span>`);
   }
   $('projMeta').innerHTML = meta.join('<span class="sep">·</span>');
 
@@ -115,7 +124,7 @@ function renderTimer() {
   $('projTimer').classList.toggle('running', p.is_running);
   $('timerBtn').textContent = p.is_running ? 'Pause' : 'Start';
   const parts = [p.is_running ? `Running since ${fmtTime(p.run_started_at)}` : 'Paused'];
-  if (p.hourly_rate > 0) parts.push(money(bill(p, secs)));
+  if (p.hourly_rate > 0) parts.push(moneyOf(p, bill(p, secs)));
   $('timerSub').textContent = parts.join(' · ');
 }
 
@@ -255,11 +264,20 @@ $('historyHost').addEventListener('click', (e) => {
 function renderTeam(live) {
   const p = live.project;
   const signedIn = !!cloud?.signed_in;
-  $('addMemberForm').classList.toggle('hidden', !(signedIn && p.is_owner));
+  const org = orgs.find((o) => o.id === p.org_id);
+  const manage = signedIn && canManageMembers(p);
+  // An organization's project takes only its people: pick them instead of typing a code.
+  $('addMemberForm').classList.toggle('hidden', !(manage && !org));
+  $('addOrgMemberForm').classList.toggle('hidden', !(manage && org));
+  if (manage && org) fillOrgPick(org, live.members);
   $('teamLeave').classList.toggle('hidden', !(signedIn && !p.is_owner));
-  $('teamHint').textContent = p.is_owner
-    ? 'Members can edit phases and features and track their own time. Only you change the plan, rate and members.'
-    : 'Only the owner can change the plan, rate and members.';
+  $('teamHint').textContent = org
+    ? (manage
+      ? `Members can edit phases and features and track their own time. You, the project owner and ${org.name}'s admins change the plan, rate and members.`
+      : `Only the project owner and ${org.name}'s admins change the plan, rate and members.`)
+    : p.is_owner
+      ? 'Members can edit phases and features and track their own time. Only you change the plan, rate and members.'
+      : 'Only the owner can change the plan, rate and members.';
   if (!signedIn) {
     $('teamHost').innerHTML = '<div class="empty-note">Sign in to Cloud sync to share this project (Settings ☰ → Cloud sync).</div>';
   } else if (live.members.length) {
@@ -284,6 +302,36 @@ $('addMemberForm').addEventListener('submit', async (e) => {
     $('teamStatus').textContent = String(err);
   } finally {
     $('addMemberBtn').disabled = false;
+  }
+});
+
+/** The organization's people who aren't in the project yet, in the picker. */
+function fillOrgPick(org, members) {
+  const select = $('orgMemberPick');
+  if (document.activeElement === select) return;
+  const addable = addableMembers(orgPeople, members.filter((m) => m.user_id));
+  $('orgPickLabel').textContent = `Add someone from ${org.name}`;
+  select.innerHTML = addable.length
+    ? addable.map((m) => `<option value="${escapeHtml(m.user_id)}">${escapeHtml(m.display_name)}</option>`).join('')
+    : `<option value="">Everyone in ${escapeHtml(org.name)} is already here</option>`;
+  select.disabled = !addable.length;
+  $('addOrgMemberBtn').disabled = !addable.length;
+}
+
+$('addOrgMemberForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const userId = $('orgMemberPick').value;
+  if (!userId) return;
+  $('addOrgMemberBtn').disabled = true;
+  $('teamStatus').textContent = 'Adding…';
+  try {
+    const name = await api.addMemberById(PROJECT_ID, userId);
+    $('teamStatus').textContent = `Added ${name}. They'll see this project and its history the next time they sync.`;
+    await load();
+  } catch (err) {
+    $('teamStatus').textContent = String(err);
+  } finally {
+    $('addOrgMemberBtn').disabled = false;
   }
 });
 

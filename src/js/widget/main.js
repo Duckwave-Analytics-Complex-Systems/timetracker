@@ -10,6 +10,8 @@ import { setupTitlebar } from '../core/titlebar.js';
 import { useSharedTheme } from '../core/theme.js';
 import { renderArchive } from './archive.js';
 import { ensureColorSlots } from './colors.js';
+import { renderOrgStats } from './org-stats.js';
+import { renderWorkspace } from './orgs.js';
 import { renderProjects } from './projects.js';
 import { initCloud, refreshCloud } from './cloud.js';
 import { initSettings } from './settings.js';
@@ -26,9 +28,11 @@ let currentView = 'projects';
 // ---------------------------------------------------------------- rendering
 
 function renderAll() {
+  renderWorkspace();
   renderProjects();
   renderToday();
   if (currentView === 'stats' && !chartHover) renderStats();
+  if (currentView === 'stats') renderOrgStats();
   if (currentView === 'archive') renderArchive();
 }
 
@@ -49,6 +53,7 @@ function setView(name) {
   if (name === 'stats') {
     resetSelection(); // open on today
     renderStats();
+    renderOrgStats();
   }
   if (name === 'archive') renderArchive();
 }
@@ -97,6 +102,8 @@ function tick() {
     api.sync().finally(() => refresh());
   }
   lastTick = now;
+  // An organization's "working now" moves with others' timers too.
+  if (currentView === 'stats' && Math.floor(now / 1000) % 30 === 0) renderOrgStats();
   if (!state.projects.some((p) => p.is_running)) return;
   renderProjects();
   renderToday();

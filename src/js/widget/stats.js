@@ -1,8 +1,10 @@
 // The Today strip (Projects tab) and the Stats tab.
 import { niceScale } from '../core/charts.js';
-import { addDays, dayKey, escapeHtml, fmtDate, fmtHM, fmtTime, money, startOfToday } from '../core/format.js';
+import { addDays, dayKey, escapeHtml, fmtDate, fmtHM, fmtTime, startOfToday } from '../core/format.js';
+import { addMoney, fmtTotal, moneyOf, newTotal } from '../core/money.js';
 import { HEATMAP_RANGES, HEAT_OPACITY, LEVELS, histogramTop, hourHeatmap, hourLabel, level, withOpenSession } from '../core/heatmap.js';
 import { bill, liveAdditions } from '../core/model.js';
+import { inWorkspace } from '../core/orgs.js';
 import { colorVar, slotOf } from './colors.js';
 import { state } from './store.js';
 
@@ -83,8 +85,10 @@ function segmentsFor(per) {
 
 // ---------------------------------------------------------------- Today strip
 
+/** Today's hours in the workspace shown (Personal or an organization). */
 export function renderToday() {
-  const per = dayMap().get(dayKey(new Date())) || new Map();
+  const here = new Set(state.projects.filter((p) => inWorkspace(p, state.workspace)).map((p) => p.id));
+  const per = dayMap((pid) => here.has(pid)).get(dayKey(new Date())) || new Map();
   const rows = rowsFor(per);
   $('todayTotal').textContent = fmtHM(rows.reduce((a, r) => a + r.secs, 0));
 
@@ -145,9 +149,11 @@ function computeStats(map, cfg) {
       if (dayTotal > best.secs) best = { secs: dayTotal, day: d };
     }
   }
-  let billed = 0, anyRate = false;
+  // Per currency: projects of an organization may bill in its currency.
+  const billed = newTotal();
+  let anyRate = false;
   for (const { p, secs } of rowsFor(perProject)) {
-    if (p.hourly_rate > 0) { billed += bill(p, secs); anyRate = true; }
+    if (p.hourly_rate > 0) { addMoney(billed, p, bill(p, secs)); anyRate = true; }
   }
   return { total, active, best, perProject, billed, anyRate };
 }
@@ -230,7 +236,7 @@ function meterRows(host, rows, emptyMsg) {
   if (!rows.length) { host.innerHTML = `<div class="meter-empty">${emptyMsg}</div>`; return; }
   const max = rows[0].secs;
   host.innerHTML = rows.map((r) => {
-    const billTxt = r.p.hourly_rate > 0 ? ` · <span class="bill">${money(bill(r.p, r.secs))}</span>` : '';
+    const billTxt = r.p.hourly_rate > 0 ? ` · <span class="bill">${moneyOf(r.p, bill(r.p, r.secs))}</span>` : '';
     return `<div class="meter"><div class="meter-top"><i style="background:${colorVar(r.pid)}"></i><span class="meter-name">${escapeHtml(r.p.name)}</span><span class="meter-val">${fmtHM(r.secs)}${billTxt}</span></div><div class="meter-track"><div class="meter-fill" style="width:${((r.secs / max) * 100).toFixed(1)}%;background:${colorVar(r.pid)}"></div></div></div>`;
   }).join('');
 }
@@ -255,10 +261,10 @@ function perDayRows(host, buckets, cfg) {
     let detail = '';
     if (open) {
       const rows = rowsFor(b.per);
-      const billed = rows.reduce((a, r) => a + (r.p.hourly_rate > 0 ? bill(r.p, r.secs) : 0), 0);
+      const billed = rows.reduce((total, r) => (r.p.hourly_rate > 0 ? addMoney(total, r.p, bill(r.p, r.secs)) : total), newTotal());
       detail = `<div class="perday-detail" id="perday-${b.key}">` +
         rows.map((r) => `<div class="perday-item"><i style="background:${colorVar(r.pid)}"></i><span class="n">${escapeHtml(r.p.name)}</span><span class="pct">${Math.round((r.secs / t) * 100)}%</span><span class="t">${fmtHM(r.secs)}</span></div>`).join('') +
-        (rows.some((r) => r.p.hourly_rate > 0) ? `<div class="perday-bill">Billed <span class="bill">${money(billed)}</span></div>` : '') +
+        (rows.some((r) => r.p.hourly_rate > 0) ? `<div class="perday-bill">Billed <span class="bill">${fmtTotal(billed)}</span></div>` : '') +
         '</div>';
     }
     const aria = t > 0
@@ -336,7 +342,7 @@ export function renderStats() {
   $('tileAvgSub').textContent = st.active ? `${st.active} active day${st.active === 1 ? '' : 's'}` : 'no activity';
   $('tileBest').textContent = st.best.day ? fmtHM(st.best.secs) : '—';
   $('tileBestSub').textContent = st.best.day ? fmtDate(st.best.day, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
-  $('tileBill').textContent = st.anyRate ? money(st.billed) : '—';
+  $('tileBill').textContent = st.anyRate ? fmtTotal(st.billed) : '—';
   $('tileBillSub').textContent = st.anyRate ? 'at current rates' : 'no hourly rates set';
 
   // chart + legend (a legend only when there are 2+ series)
