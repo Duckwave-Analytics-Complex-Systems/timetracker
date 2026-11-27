@@ -452,7 +452,7 @@ pub struct SessionsView {
 
 #[tauri::command]
 pub fn get_shared_sessions(db: State<Db>) -> CmdResult<SessionsView> {
-    Ok(SessionsView { me: db.me().map_err(msg)?, sessions: db.list_sessions().map_err(msg)? })
+    Ok(SessionsView { me: db.me().map_err(msg)?, sessions: db.list_shared_sessions().map_err(msg)? })
 }
 
 /// Shares your running timer with people in the project. Returns the session's id.
