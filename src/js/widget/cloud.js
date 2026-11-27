@@ -22,7 +22,7 @@ function render() {
     const last = s.last_sync_at ? `Last synced at ${fmtTime(s.last_sync_at)}.` : 'Not synced yet.';
     const refused = s.refused_changes ? `<br>${s.refused_changes} change(s) were refused by the server and undone.` : '';
     $('cloudSummary').innerHTML =
-      `Signed in as <b>${escapeHtml(s.email)}</b><br><span class="muted">${escapeHtml(s.url)}<br>${last}${refused}</span>`;
+      `Signed in as <b>${escapeHtml(s.email)}</b><br><span class="muted">${last}${refused}</span>`;
   }
   $('cloudProfile').classList.toggle('hidden', !(s.signed_in && s.profile));
   if (s.profile) {
@@ -67,7 +67,6 @@ async function run(button, action) {
 $('cloudBtn').addEventListener('click', () => {
   $('settingsPanel').classList.add('hidden');
   showFormError('');
-  if (status?.url) $('cloudUrl').value ||= status.url;
   if (status?.linked_email) $('cloudEmail').value ||= status.linked_email;
   dialog.showModal();
 });
@@ -99,8 +98,6 @@ $('cloudForm').addEventListener('submit', async (e) => {
   if (!confirmAccountSwitch($('cloudEmail').value)) return;
   const ok = await run($('cloudSignIn'), () =>
     api.cloudSignIn({
-      url: $('cloudUrl').value,
-      anonKey: $('cloudKey').value,
       email: $('cloudEmail').value,
       password: $('cloudPassword').value,
     }));

@@ -38,7 +38,6 @@ const PULL_PAGE: usize = 500;
 const EPOCH: &str = "1970-01-01T00:00:00Z";
 
 // sync_meta keys
-const K_CONFIG: &str = "config";
 const K_SESSION: &str = "session";
 const K_DEVICE: &str = "device_id";
 const K_TIMER: &str = "timer_known";
@@ -58,10 +57,19 @@ fn msg(e: impl ToString) -> String {
 }
 
 /// Which Supabase project to talk to.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Clone)]
 struct Config {
     url: String,
     anon_key: String,
+}
+
+const NO_SERVER: &str = "This build of TimeTrack has no cloud server set up.";
+
+/// The server baked in at build time (see build.rs); `None` if the build has none.
+fn built_in() -> Option<Config> {
+    let url = env!("TT_SUPABASE_URL").trim_end_matches('/');
+    let anon_key = env!("TT_SUPABASE_ANON_KEY");
+    (!url.is_empty() && !anon_key.is_empty()).then(|| Config { url: url.into(), anon_key: anon_key.into() })
 }
 
 /// A signed-in Supabase user. The password is never stored.
@@ -92,7 +100,6 @@ fn on() -> bool {
 /// What the Settings panel shows.
 #[derive(Serialize, Clone, Default)]
 pub struct SyncStatus {
-    pub url: Option<String>,
     pub email: Option<String>,
     pub signed_in: bool,
     pub last_sync_at: Option<i64>,
@@ -164,9 +171,7 @@ fn device_id(db: &Db) -> SyncResult<String> {
 pub fn status(app: &AppHandle) -> SyncStatus {
     let db = app.state::<Db>();
     let mut s = app.state::<SyncState>().status.lock().unwrap().clone();
-    let config: Option<Config> = load(&db, K_CONFIG);
     let session: Option<Session> = load(&db, K_SESSION);
-    s.url = config.map(|c| c.url);
     s.signed_in = session.is_some();
     s.email = session.map(|s| s.email);
     s.linked = db.sync_meta(K_USER_ID).ok().flatten().is_some();
@@ -538,7 +543,7 @@ pub fn run_cycle(app: &AppHandle) {
     let state = app.state::<SyncState>();
     let _one_at_a_time = state.running.lock().unwrap();
     let db = app.state::<Db>();
-    let (Some(cfg), Some(session)) = (load::<Config>(&db, K_CONFIG), load::<Session>(&db, K_SESSION)) else {
+    let (Some(cfg), Some(session)) = (built_in(), load::<Session>(&db, K_SESSION)) else {
         return;
     };
     // An unsupported version could write rows the server no longer expects.
@@ -576,12 +581,8 @@ pub fn run_cycle(app: &AppHandle) {
 /// - Same account as before: just resumes; queued changes go up.
 /// - A different account: this device's data is replaced by that account's.
 ///   The frontend asks for confirmation first (`linked_email` in the status).
-pub fn sign_in(app: &AppHandle, url: &str, anon_key: &str, email: &str, password: &str) -> SyncResult<SyncStatus> {
-    let url = url.trim().trim_end_matches('/').to_string();
-    if !url.starts_with("https://") && !url.starts_with("http://") {
-        return Err("The project URL should look like https://xxxx.supabase.co".into());
-    }
-    let cfg = Config { url, anon_key: anon_key.trim().to_string() };
+pub fn sign_in(app: &AppHandle, email: &str, password: &str) -> SyncResult<SyncStatus> {
+    let cfg = built_in().ok_or(NO_SERVER)?;
     let session = auth(&cfg, "password", json!({ "email": email.trim(), "password": password }))?;
 
     {
@@ -604,7 +605,6 @@ pub fn sign_in(app: &AppHandle, url: &str, anon_key: &str, email: &str, password
             db.set_sync_meta(K_USER_ID, Some(&session.user_id)).map_err(msg)?;
         }
         db.set_sync_meta(K_USER_EMAIL, Some(&session.email)).map_err(msg)?;
-        store(&db, K_CONFIG, Some(&cfg))?;
         store(&db, K_SESSION, Some(&session))?;
     }
     run_cycle(app);
@@ -630,7 +630,7 @@ pub fn sign_out(app: &AppHandle) -> SyncResult<SyncStatus> {
 /// Runs one server call as the signed-in user, with its error in plain words.
 fn as_signed_in<T>(app: &AppHandle, call: impl FnOnce(&Db, &Rest) -> SyncResult<T>) -> SyncResult<T> {
     let db = app.state::<Db>();
-    let (Some(cfg), Some(session)) = (load::<Config>(&db, K_CONFIG), load::<Session>(&db, K_SESSION)) else {
+    let (Some(cfg), Some(session)) = (built_in(), load::<Session>(&db, K_SESSION)) else {
         return Err("Sign in to Cloud sync first (Settings ☰ → Cloud sync).".into());
     };
     let session = fresh_session(&db, &cfg, session)?;

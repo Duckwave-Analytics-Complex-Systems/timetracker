@@ -176,9 +176,14 @@ using the same account shares the same projects.
    person. If nobody else should be able to create an account, turn off
    "Allow new users to sign up" under **Authentication → Sign In / Providers**.
 4. In **Project Settings → API**, copy the project URL and the `anon` public
-   key. Both are safe to share. Never use the `service_role` key in an app.
-5. In TimeTrack, open **Settings ☰ → Cloud sync** and enter the URL, the key,
-   your email and your password.
+   key. Never use the `service_role` key in an app.
+5. Build TimeTrack with them baked in: set `TT_SUPABASE_URL` and
+   `TT_SUPABASE_ANON_KEY` when building (the mobile app's
+   `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY`, from the
+   environment or its `.env.local` next to this folder, also work). The app
+   never shows them.
+6. In TimeTrack, open **Settings ☰ → Cloud sync** and enter your email and
+   password.
 
 ### Accounts and devices
 

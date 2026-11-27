@@ -314,8 +314,8 @@ pub fn cloud_status(app: AppHandle) -> SyncStatus {
 }
 
 #[tauri::command]
-pub async fn cloud_sign_in(app: AppHandle, url: String, anon_key: String, email: String, password: String) -> CmdResult<SyncStatus> {
-    tauri::async_runtime::spawn_blocking(move || cloud::sign_in(&app, &url, &anon_key, &email, &password))
+pub async fn cloud_sign_in(app: AppHandle, email: String, password: String) -> CmdResult<SyncStatus> {
+    tauri::async_runtime::spawn_blocking(move || cloud::sign_in(&app, &email, &password))
         .await
         .map_err(msg)?
 }

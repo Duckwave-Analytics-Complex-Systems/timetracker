@@ -54,9 +54,9 @@ export const api = {
   exportCsv: () => invoke('export_csv'),
 
   // ---- cloud sync (src-tauri/src/sync.rs). These four return
-  // { url, email, signed_in, last_sync_at, last_error, profile, refused_changes }.
+  // { email, signed_in, last_sync_at, last_error, profile, refused_changes }.
   cloudStatus: () => invoke('cloud_status'),
-  cloudSignIn: ({ url, anonKey, email, password }) => invoke('cloud_sign_in', { url, anonKey, email, password }),
+  cloudSignIn: ({ email, password }) => invoke('cloud_sign_in', { email, password }),
   cloudSignOut: () => invoke('cloud_sign_out'),
   cloudSyncNow: () => invoke('cloud_sync_now'),
   cloudSetDisplayName: (name) => invoke('cloud_set_display_name', { name }),
