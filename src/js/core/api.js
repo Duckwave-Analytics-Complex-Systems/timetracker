@@ -63,6 +63,48 @@ export const api = {
   addMember: (projectId, shareCode) => invoke('cloud_add_member', { projectId, shareCode }),
   /** Removing yourself is leaving the project. */
   removeMember: (projectId, userId) => invoke('cloud_remove_member', { projectId, userId }),
+
+  // ---- organizations (supabase/schema.sql, "organizations"). The reads are
+  // this computer's copy as of the last sync; the cloud* calls go to the
+  // server and sync before they resolve.
+  /** [{ id, name, logo_data, currency, default_rate, week_start, join_code, role, people }] */
+  orgs: () => invoke('get_orgs'),
+  /** [{ org_id, user_id, role, display_name, joined_at, is_me }], owner first. */
+  orgMembers: (orgId) => invoke('get_org_members', { orgId }),
+  /** Resolves to the new organization's id. */
+  createOrg: (name) => invoke('cloud_create_org', { name }),
+  /** Resolves to the organization's id. */
+  joinOrg: (code) => invoke('cloud_join_org', { code }),
+  /** Resolves to the added person's name. */
+  addOrgMember: (orgId, shareCode) => invoke('cloud_add_org_member', { orgId, shareCode }),
+  /** Removing yourself is leaving the organization. */
+  removeOrgMember: (orgId, userId) => invoke('cloud_remove_org_member', { orgId, userId }),
+  /** role: 'admin' | 'member', or 'owner' to hand the organization over. */
+  setOrgRole: (orgId, userId, role) => invoke('cloud_set_org_role', { orgId, userId, role }),
+  /** changes: { name?, logo_data?, currency?, default_rate?, week_start? } */
+  updateOrg: (orgId, changes) => invoke('cloud_update_org', { orgId, changes }),
+  /** Resolves to the new invite code. */
+  resetOrgJoinCode: (orgId) => invoke('cloud_reset_org_join_code', { orgId }),
+  deleteOrg: (orgId) => invoke('cloud_delete_org', { orgId }),
+  /** This computer's sessions on the organization's projects from fromMs on: [{ project_id, user_id, start_ts, seconds }] */
+  orgEntries: (orgId, fromMs) => invoke('get_org_entries', { orgId, fromMs }),
+  /** From the server: [{ user_id, display_name, role, weekly_goal_hours, running, project_id, project_name, started_at }] */
+  orgPresence: (orgId) => invoke('cloud_org_presence', { orgId }),
+
+  // ---- shared sessions (supabase/schema.sql, "shared sessions")
+  /** { me, sessions: [{ id, project_id, project_name, host_id, host_name, started_at, my_status, people }] } */
+  sharedSessions: () => invoke('get_shared_sessions'),
+  /** Shares your running timer on the project with userIds (people in it). Resolves to the session's id. */
+  shareSession: (projectId, userIds) => invoke('cloud_share_session', { projectId, userIds }),
+  /** Joins a session you were asked to, from startedAt (after pausing what you were tracking). */
+  joinSession: (sessionId, startedAt) => invoke('cloud_join_session', { sessionId, startedAt }),
+  declineSession: (sessionId) => invoke('cloud_decline_session', { sessionId }),
+
+  // ---- updates (src-tauri/src/updates.rs)
+  /** { current, latest, available, required, notes, download_url }. Rejects when offline. */
+  checkForUpdate: () => invoke('check_for_update'),
+  /** Opens the download page from the last check in the browser. */
+  openUpdateDownload: () => invoke('open_update_download'),
 };
 
 /**

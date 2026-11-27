@@ -448,3 +448,126 @@
 .share-code { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .share-code code { font-size: 14px; letter-spacing: 0.04em; user-select: all; }
 #cloudSignedIn .dialog-actions button { padding-inline: 10px; white-space: nowrap; }
+
+/* ---------------- Workspaces and organizations (js/widget/orgs.js) ---------------- */
+.workspace-btn {
+  background: none; border: none; color: var(--text-primary);
+  padding: 3px 6px 3px 4px; border-radius: 7px; cursor: pointer; max-width: 210px;
+}
+.workspace-btn:hover, .workspace-btn[aria-expanded="true"] { background: var(--surface-hover); }
+.workspace-caret { color: var(--text-muted); font-size: 10px; flex-shrink: 0; }
+.ws-mark { display: inline-flex; flex-shrink: 0; }
+
+.org-badge, .ws-mark-img {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: 6px; object-fit: cover;
+  background: var(--surface-selected); color: var(--text-primary);
+  font-family: var(--font-display); font-weight: 700; font-size: 11px;
+}
+.ws-mark-img { width: 16px; height: 16px; font-size: 9px; border-radius: 4px; }
+.org-badge.personal { border-radius: 50%; background: var(--accent-running-dim); box-shadow: inset 0 0 0 2px var(--accent-running); }
+
+.workspace-menu { width: 250px; }
+.workspace-menu .ws-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; }
+.workspace-menu .ws-row.on { background: var(--surface-selected); }
+.ws-row-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ws-row-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-row-detail { font-size: 11px; color: var(--text-muted); }
+.ws-check { color: var(--accent-running); font-weight: 700; }
+.ws-divider { height: 1px; background: var(--border-hair); margin: 4px 2px; }
+.ws-hint { margin: 4px 8px 6px; font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+
+/* Bars above the project list: the organization shown, and a timer running elsewhere */
+.ws-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 10px 12px 0; padding: 7px 10px;
+  background: var(--surface); border: 1px solid var(--border-hair); border-radius: var(--radius-sm);
+  color: var(--text-muted); font-size: 12px; font-family: var(--font-body);
+  text-align: left; cursor: pointer;
+}
+.ws-bar:hover { border-color: var(--text-faint); }
+.ws-bar.away { border-color: var(--accent-running-dim); }
+.ws-bar.away .status-dot { background: var(--accent-running); box-shadow: 0 0 6px var(--accent-running); }
+.ws-bar b { color: var(--text-primary); font-weight: 600; }
+.ws-bar-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-bar-link { color: var(--text-primary); font-weight: 500; flex-shrink: 0; }
+
+/* Organization dialogs */
+.org-intro { margin: -6px 0 12px; }
+.org-dialog { width: min(320px, calc(100vw - 60px)); }
+.org-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.org-head .org-badge { width: 34px; height: 34px; font-size: 15px; border-radius: 9px; }
+.org-head-text { min-width: 0; }
+.org-head h2 { margin: 0; overflow-wrap: anywhere; }
+.org-sub { font-size: 11.5px; color: var(--text-muted); }
+.org-code-actions { display: inline-flex; gap: 6px; }
+.org-people { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto; }
+.org-person { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--text-primary); font-size: 12.5px; }
+.org-person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-person .muted { color: var(--text-muted); }
+.org-person select {
+  background: var(--bg-void); border: 1px solid var(--border-hair); border-radius: 7px;
+  color: var(--text-primary); font-size: 11.5px; padding: 3px 6px;
+}
+.org-role { color: var(--text-muted); font-size: 11.5px; }
+.org-remove-gap { width: 28px; flex-shrink: 0; }
+.share-code input {
+  flex: 1; min-width: 0; background: var(--bg-void); border: 1px solid var(--border-hair); border-radius: 8px;
+  padding: 7px 10px; color: var(--text-primary); font-size: 13px; font-family: var(--font-body);
+}
+.org-logo-preview { display: inline-flex; align-items: center; font-size: 12px; }
+.org-logo-preview .muted { color: var(--text-faint); }
+
+/* Organization dashboard in the Stats tab (js/widget/org-stats.js) */
+.org-stats { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+.os-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.os-head h2 { font-family: var(--font-display); font-size: 14px; margin: 0; }
+.os-head .seg button { padding: 4px 8px; font-size: 11px; }
+.os-sub { margin: -4px 0 0; font-size: 11px; color: var(--text-muted); }
+.os-tiles { grid-template-columns: 1fr 1fr; }
+.os-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.os-person { display: flex; flex-direction: column; gap: 5px; padding: 5px 0; }
+.os-name { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-name small { display: block; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.os-name .muted { color: var(--text-muted); }
+.os-fig { font-size: 12px; color: var(--text-primary); font-variant-numeric: tabular-nums; text-align: right; flex-shrink: 0; }
+.os-fig small { display: block; font-size: 11px; }
+.os-track { flex: 1; height: 5px; border-radius: 3px; background: var(--surface-selected); overflow: hidden; }
+.os-track i { display: block; height: 100%; background: var(--accent-running); border-radius: 3px; }
+.os-track i.full { background: var(--accent-earnings); }
+.os-pct { width: 36px; text-align: right; font-size: 11px; color: var(--text-muted); }
+.os-empty { margin: 2px 0; font-size: 12px; color: var(--text-muted); }
+.status-dot.live { background: var(--accent-running); box-shadow: 0 0 5px 1px var(--accent-running); flex-shrink: 0; }
+.os-export { align-self: flex-start; }
+.os-divider { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.os-divider::before, .os-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-hair); }
+.check-row { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-primary); line-height: 1.4; margin-bottom: 8px; cursor: pointer; }
+.check-row input { margin-top: 2px; accent-color: var(--accent-running); }
+.os-person > .os-track { flex: none; }
+#orgCurrency { text-transform: uppercase; }
+.card-with { font-size: 11.5px; color: var(--accent-running); margin-top: 1px; }
+.session-people { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; max-height: 220px; overflow-y: auto; }
+
+/* ---------------- Update available (js/widget/updates.js) ---------------- */
+.update-bar {
+  margin: 8px 12px 0; padding: 8px 10px;
+  background: var(--surface); border: 1px solid var(--accent-running-dim); border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--text-muted); line-height: 1.45;
+}
+.update-bar.required { border-color: rgba(232, 179, 77, 0.45); background: rgba(232, 179, 77, 0.08); }
+.update-bar b { color: var(--text-primary); font-weight: 600; }
+.update-bar-row { display: flex; align-items: center; gap: 8px; }
+.update-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--accent-running); box-shadow: 0 0 6px var(--accent-running); }
+.update-bar.required .update-dot { background: var(--accent-earnings); box-shadow: 0 0 6px var(--accent-earnings); }
+.update-text { flex: 1; min-width: 0; }
+.update-bar .link-btn { flex-shrink: 0; font-size: 11.5px; }
+.update-download {
+  flex-shrink: 0; cursor: pointer;
+  background: var(--accent-running); color: var(--bg-void); border: none; border-radius: 6px;
+  font: inherit; font-size: 11.5px; font-weight: 600; padding: 4px 10px;
+}
+.update-download:hover { filter: brightness(1.1); }
+.update-notes { margin: 6px 0 0 15px; color: var(--text-primary); white-space: pre-line; }
+.update-hint { margin: 4px 0 0 15px; font-size: 11px; color: var(--text-faint); }
+.settings-row .muted { color: var(--text-muted); }
+.update-check-status { padding: 0 4px 4px; font-size: 11.5px; color: var(--text-muted); overflow-wrap: anywhere; }

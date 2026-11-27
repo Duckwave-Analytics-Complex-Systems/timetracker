@@ -7,6 +7,7 @@
 use crate::db::{self, ClosedSession, DailyRow, DayTotal, Db, Feature, FeatureInput, MemberHours, Phase, PhaseInput, PlanInput, Project, RecoveredRun, Session, SessionSpan};
 use crate::events::{notify, Change};
 use crate::sync::{self as cloud, SyncStatus};
+use crate::updates::{self, UpdateInfo};
 use crate::{now_ms, watchdog};
 use serde::Serialize;
 use std::sync::Mutex;
@@ -367,4 +368,27 @@ pub async fn open_project_window(app: AppHandle, id: String) -> CmdResult<()> {
         .build()
         .map_err(msg)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------- updates
+
+/// Reads the public version manifest. Errs when offline: the widget stays quiet.
+#[tauri::command]
+pub async fn check_for_update(app: AppHandle) -> CmdResult<UpdateInfo> {
+    let info = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        move || updates::check(&app)
+    })
+    .await
+    .map_err(msg)??;
+    if info.required {
+        cloud::poke(); // show the "update to keep syncing" status now
+    }
+    Ok(info)
+}
+
+/// Opens the download page in the browser.
+#[tauri::command]
+pub fn open_update_download(app: AppHandle) -> CmdResult<()> {
+    updates::open_download(&app)
 }
